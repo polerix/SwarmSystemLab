@@ -3,7 +3,10 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Alien Ant Farm Simulator - Rebuild + Balance Lab</title>
+  <meta name="description" content="Swarm System Lab Simulator — autonomous hive warfare sandbox tuned for GitHub Pages." />
+  <meta name="theme-color" content="#05060a" />
+  <link rel="icon" href="Ant.png" type="image/png" />
+  <title>Swarm System Lab Simulator - Rebuild + Balance Lab</title>
   <style>
     :root{
       --bg:#05060a;
@@ -33,6 +36,7 @@
       --protein: rgb(255,210,130);
       --spore: rgb(160,255,220);
       --dirt: rgb(150,105,70);
+      --milk: #ffe9c0;
     }
 
     html,body{
@@ -62,6 +66,7 @@
     .dot.cyan{background:var(--cyan)}
     .dot.worm{background:#d7d7ff}
     .dot.beetle{background:#c7c7c7}
+    .dot.mealworm{background:#ffd6a0}
     .pill{padding:1px 6px;border:1px solid rgba(160,180,255,0.2);border-radius:999px;color:var(--muted)}
     .good{color:#7dff86}
     .bad{color:#ff5c7a}
@@ -122,15 +127,317 @@
     .hint{color:var(--muted);line-height:1.35;margin-top:6px}
     .mono{font-family:inherit; font-size:11px; color:rgba(232,236,255,0.92); white-space:pre-wrap; word-break:break-word}
     .labBox{border:1px solid rgba(160,180,255,0.16); border-radius:12px; padding:8px 10px; background:rgba(0,0,0,0.12)}
+
+    .site-header{
+      position:fixed;
+      left:clamp(12px, 2vw, 48px);
+      top:16px;
+      width:min(420px, calc(100vw - 24px));
+      padding:18px 22px;
+      border-radius:20px;
+      background:rgba(10,13,23,0.9);
+      border:1px solid rgba(160,180,255,0.25);
+      color:var(--text);
+      z-index:13;
+      box-shadow:0 25px 60px rgba(0,0,0,0.45);
+      backdrop-filter: blur(18px);
+    }
+    .site-header .eyebrow{
+      text-transform:uppercase;
+      letter-spacing:0.2em;
+      font-size:0.65rem;
+      color:var(--muted);
+      margin:0 0 4px;
+    }
+    .site-header h1{
+      margin:0;
+      font-size:clamp(1.5rem, 3vw, 1.9rem);
+    }
+    .site-header p{
+      margin:6px 0 14px;
+      color:var(--muted);
+    }
+    .header-actions{
+      display:flex;
+      flex-wrap:wrap;
+      gap:10px;
+    }
+    .cta-btn{
+      border:none;
+      background:linear-gradient(120deg, var(--orange), var(--cyan));
+      color:#05060a;
+      font-weight:600;
+      border-radius:999px;
+      padding:8px 18px;
+      cursor:pointer;
+      transition:transform 160ms ease, box-shadow 160ms ease;
+    }
+    .cta-btn:active{ transform:translateY(1px); }
+    .ghost-link{
+      align-self:flex-end;
+      color:var(--text);
+      text-decoration:none;
+      border-bottom:1px solid rgba(255,255,255,0.4);
+      padding-bottom:2px;
+      font-size:0.9rem;
+    }
+    .floating-panels{
+      position:fixed;
+      inset:0;
+      pointer-events:none;
+      z-index:14;
+    }
+    .panel-window{
+      position:absolute;
+      width:min(360px, calc(100vw - 48px));
+      background:rgba(10,13,23,0.92);
+      border:1px solid rgba(160,180,255,0.3);
+      border-radius:18px;
+      box-shadow:0 20px 50px rgba(0,0,0,0.45);
+      color:var(--text);
+      display:none;
+      pointer-events:auto;
+    }
+    .panel-window--alt{
+      border-style:dashed;
+    }
+    .panel-window__bar{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      font-weight:600;
+      padding:10px 14px;
+      cursor:grab;
+      background:rgba(255,255,255,0.05);
+      border-bottom:1px solid rgba(160,180,255,0.18);
+      border-radius:18px 18px 0 0;
+    }
+    .panel-window__close{
+      border:none;
+      background:rgba(255,255,255,0.1);
+      color:var(--text);
+      border-radius:50%;
+      width:28px;
+      height:28px;
+      font-size:1rem;
+      cursor:pointer;
+    }
+    .panel-window__body{
+      padding:14px 16px 18px;
+      color:var(--muted);
+    }
+    .panel__hint{
+      margin:12px 0 0;
+      color:var(--muted);
+      font-size:0.85rem;
+    }
+    .keymap{
+      list-style:none;
+      margin:0;
+      padding:0;
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+      color:var(--muted);
+    }
+    .keymap li{
+      display:flex;
+      justify-content:space-between;
+      border-bottom:1px solid rgba(255,255,255,0.08);
+      padding:4px 0;
+      font-size:0.9rem;
+    }
+    .site-footer{
+      position:fixed;
+      left:clamp(12px, 2vw, 48px);
+      bottom:120px;
+      width:min(420px, calc(100vw - 24px));
+      color:var(--muted);
+      font-size:0.85rem;
+      background:rgba(10,13,23,0.84);
+      border:1px solid rgba(160,180,255,0.22);
+      border-radius:16px;
+      padding:10px 14px;
+      backdrop-filter:blur(12px);
+      z-index:13;
+    }
+    .noscript{
+      position:fixed;
+      inset:0;
+      background:rgba(0,0,0,0.9);
+      color:#fff;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      font-size:1.2rem;
+      z-index:20;
+    }
+    #status{
+      left:clamp(12px, 2vw, 48px);
+      right:auto;
+      width:min(420px, calc(100vw - 24px));
+      top:clamp(280px, 32vh, 360px);
+      box-shadow:0 20px 50px rgba(0,0,0,0.35);
+    }
+    #menuBtn{
+      left:clamp(12px, 2vw, 48px);
+      top:clamp(440px, 48vh, 520px);
+    }
+    #menu{
+      left:clamp(12px, 2vw, 48px);
+      top:clamp(480px, 52vh, 560px);
+    }
+    .dock{
+      position:fixed;
+      left:clamp(12px, 2vw, 48px);
+      bottom:24px;
+      width:min(420px, calc(100vw - 24px));
+      display:flex;
+      flex-wrap:wrap;
+      gap:10px;
+      padding:10px 12px;
+      border-radius:18px;
+      background:rgba(10,13,23,0.9);
+      border:1px solid rgba(160,180,255,0.25);
+      box-shadow:0 20px 50px rgba(0,0,0,0.35);
+      z-index:15;
+    }
+    .dock__btn{
+      flex:1 1 45%;
+      border:1px solid rgba(160,180,255,0.3);
+      background:rgba(255,255,255,0.05);
+      color:var(--text);
+      border-radius:12px;
+      padding:8px 10px;
+      cursor:pointer;
+      font-weight:600;
+    }
+    .dock__btn.is-active{
+      background:linear-gradient(120deg, var(--orange), var(--cyan));
+      color:#05060a;
+      border-color:transparent;
+    }
+    @media (max-width: 900px){
+      body{ overflow-y:auto; }
+      .site-header,
+      .floating-panels,
+      #status,
+      #menuBtn,
+      #menu,
+      .site-footer,
+      .dock{
+        position:relative;
+        left:auto;
+        right:auto;
+        top:auto;
+        bottom:auto;
+        width:auto;
+        margin:12px auto;
+      }
+      .floating-panels{
+        width:auto;
+        position:relative;
+      }
+      .panel-window{
+        position:relative;
+        width:auto;
+        margin:12px auto;
+      }
+      #menu{
+        width:calc(100% - 24px);
+      }
+      .dock{
+        width:calc(100% - 24px);
+      }
+      canvas{
+        position:fixed;
+      }
+    }
   </style>
 </head>
 <body>
 <canvas id="c"></canvas>
 
+<header class="site-header">
+  <p class="eyebrow">Swarm System Lab</p>
+  <h1>Swarm Systems Lab</h1>
+  <p>Autonomous hive-vs-hive simulator with weather, pheromones, and surface threats — packaged for GitHub Pages.</p>
+  <div class="header-actions">
+    <button class="cta-btn" type="button" id="heroReset">Reset Simulation</button>
+    <a class="ghost-link" href="https://github.com/polerixsys/SwarmSystemLab" target="_blank" rel="noopener">View repository</a>
+  </div>
+</header>
+
+<div class="floating-panels" id="floatingPanels">
+  <section class="panel-window" id="panel_about" data-title="About Swarm Systems Lab">
+    <div class="panel-window__bar">
+      <span>About Swarm Systems Lab</span>
+      <button type="button" class="panel-window__close" data-close>&times;</button>
+    </div>
+    <div class="panel-window__body">
+      <p>Swarm System Lab is an autonomous hive-vs-hive simulator with weather, pheromones, storms, and emergent surface threats. Everything packs into a single HTML file so GitHub Pages hosting is painless.</p>
+      <p>Use this build as your sandbox or pitch deck — each run produces a different story, and Balance Lab lets you auto-tune parameters for longer survivability.</p>
+    </div>
+  </section>
+
+  <section class="panel-window" id="panel_mission" data-title="Mission Feed">
+    <div class="panel-window__bar">
+      <span>Mission Feed</span>
+      <button type="button" class="panel-window__close" data-close>&times;</button>
+    </div>
+    <div class="panel-window__body">
+      <p>Monitor the status chips (Orange, Cyan, Fauna) to keep tabs on the simulation. Toggle chips from the menu bar if you want a cleaner overlay.</p>
+      <p>Balance Lab tweaks pheromone decay, solar intensity, and worker splits — reset with Lab enabled to apply the best parameters.</p>
+    </div>
+  </section>
+
+  <section class="panel-window" id="panel_help" data-title="Help">
+    <div class="panel-window__bar">
+      <span>Help & Controls</span>
+      <button type="button" class="panel-window__close" data-close>&times;</button>
+    </div>
+    <div class="panel-window__body">
+      <ul class="keymap">
+        <li><span>Drag</span><span>Pan camera</span></li>
+        <li><span>Scroll</span><span>Zoom (sensitivity slider)</span></li>
+        <li><span>D key</span><span>Drop emergency food</span></li>
+        <li><span>Menu ► Reset</span><span>Re-roll the world</span></li>
+        <li><span>Mealworms</span><span>Pen tunnels for milk drops</span></li>
+      </ul>
+      <p class="panel__hint">Panels can be dragged anywhere — use the dock below to relaunch or collapse them.</p>
+    </div>
+  </section>
+
+  <section class="panel-window panel-window--alt" id="panel_build" data-title="Build Notes">
+    <div class="panel-window__bar">
+      <span>Build Notes</span>
+      <button type="button" class="panel-window__close" data-close>&times;</button>
+    </div>
+    <div class="panel-window__body">
+      <p>Everything is single-file (HTML + CSS + JS), making deployment to GitHub Pages or any static host trivial.</p>
+      <p>Mealworm husbandry ties into colony stores: capture them underground to drip luminous milk that workers haul like protein.</p>
+    </div>
+  </section>
+</div>
+
+<nav class="dock" id="panelDock" aria-label="Panel launcher">
+  <button type="button" class="dock__btn" data-panel-target="panel_about">About</button>
+  <button type="button" class="dock__btn" data-panel-target="panel_mission">Mission Feed</button>
+  <button type="button" class="dock__btn" data-panel-target="panel_help">Help</button>
+  <button type="button" class="dock__btn" data-panel-target="panel_build">Build Notes</button>
+</nav>
+
+<footer class="site-footer">
+  <p>&copy; <span id="year"></span> Swarm System Lab. Field kit ready for any static host.</p>
+</footer>
+
+<noscript class="noscript">Enable JavaScript to command the colony.</noscript>
+
 <div id="status">
   <div class="srow" id="s_orange"><span class="dot orange"></span><span id="st_orange">Orange: ...</span></div>
   <div class="srow" id="s_cyan"><span class="dot cyan"></span><span id="st_cyan">Cyan: ...</span></div>
   <div class="srow" id="s_worm"><span class="dot worm"></span><span id="st_worm">Worms: ...</span></div>
+  <div class="srow" id="s_mealworm"><span class="dot mealworm"></span><span id="st_mealworm">Mealworms: ...</span></div>
   <div class="srow" id="s_beetle"><span class="dot beetle"></span><span id="st_beetle">Beetles: ...</span></div>
 </div>
 
@@ -138,7 +445,7 @@
 
 <div id="menu">
   <div id="menuHeader">
-    <div class="t">Alien Ant Farm Simulator</div>
+    <div class="t">Swarm System Lab Simulator</div>
     <div class="x" id="menuClose">Close</div>
   </div>
   <div id="menuBody">
@@ -153,6 +460,7 @@
         <label style="margin-right:6px;"><input id="chkSO" type="checkbox" checked>O</label>
         <label style="margin-right:6px;"><input id="chkSC" type="checkbox" checked>C</label>
         <label style="margin-right:6px;"><input id="chkSW" type="checkbox" checked>W</label>
+        <label style="margin-right:6px;"><input id="chkSM" type="checkbox" checked>M</label>
         <label><input id="chkSB" type="checkbox" checked>B</label>
       </span>
     </div>
@@ -213,6 +521,119 @@
 <script>
 (() => {
   "use strict";
+
+  const yearLabel = document.getElementById("year");
+  if(yearLabel) yearLabel.textContent = new Date().getFullYear();
+  const heroResetBtn = document.getElementById("heroReset");
+  if(heroResetBtn){
+    heroResetBtn.addEventListener("click", () => {
+      const resetBtn = document.getElementById("btnReset");
+      if(resetBtn) resetBtn.click();
+    });
+  }
+
+  const dockButtons = document.querySelectorAll("[data-panel-target]");
+  const panelWindows = Array.from(document.querySelectorAll(".panel-window"));
+  const dockMap = {};
+  let panelZ = 40;
+  let dragState = null;
+
+  const setDockState = (panelId, isOpen) => {
+    (dockMap[panelId] || []).forEach(btn => {
+      btn.classList.toggle("is-active", isOpen);
+      btn.setAttribute("aria-pressed", String(isOpen));
+    });
+  };
+
+  const bringToFront = (panel) => {
+    panel.style.zIndex = ++panelZ;
+  };
+
+  const clampPos = (val, min, max) => Math.max(min, Math.min(max, val));
+
+  const stopDragging = () => {
+    dragState = null;
+    document.removeEventListener("mousemove", handleDrag);
+    document.removeEventListener("mouseup", stopDragging);
+  };
+
+  const handleDrag = (e) => {
+    if(!dragState) return;
+    const panel = dragState.panel;
+    const maxX = window.innerWidth - panel.offsetWidth;
+    const maxY = window.innerHeight - panel.offsetHeight;
+    const x = clampPos(e.clientX - dragState.offsetX, 8, Math.max(8, maxX));
+    const y = clampPos(e.clientY - dragState.offsetY, 80, Math.max(80, maxY));
+    panel.style.left = `${x}px`;
+    panel.style.top = `${y}px`;
+  };
+
+  const startDrag = (panel, e) => {
+    e.preventDefault();
+    bringToFront(panel);
+    dragState = {
+      panel,
+      offsetX: e.clientX - panel.offsetLeft,
+      offsetY: e.clientY - panel.offsetTop
+    };
+    document.addEventListener("mousemove", handleDrag);
+    document.addEventListener("mouseup", stopDragging);
+  };
+
+  const openPanel = (panel) => {
+    if(!panel) return;
+    panel.style.display = "block";
+    panel.classList.add("is-open");
+    if(!panel.dataset.positioned){
+      const offsetX = (Math.random() * 120) - 60;
+      const offsetY = (Math.random() * 80) - 40;
+      panel.style.left = `calc(50% - 180px + ${offsetX}px)`;
+      panel.style.top = `calc(45vh + ${offsetY}px)`;
+      panel.dataset.positioned = "true";
+    }
+    bringToFront(panel);
+    setDockState(panel.id, true);
+  };
+
+  const closePanel = (panel) => {
+    if(!panel) return;
+    panel.style.display = "none";
+    panel.classList.remove("is-open");
+    setDockState(panel.id, false);
+  };
+
+  panelWindows.forEach(panel => {
+    const targetId = panel.id;
+    dockMap[targetId] = dockMap[targetId] || [];
+    const closeBtn = panel.querySelector("[data-close]");
+    if(closeBtn){
+      closeBtn.addEventListener("click", () => closePanel(panel));
+    }
+    const bar = panel.querySelector(".panel-window__bar");
+    if(bar){
+      bar.addEventListener("mousedown", (e) => startDrag(panel, e));
+      bar.addEventListener("dblclick", () => closePanel(panel));
+    }
+  });
+
+  dockButtons.forEach(btn => {
+    const targetId = btn.dataset.panelTarget;
+    if(!dockMap[targetId]) dockMap[targetId] = [];
+    dockMap[targetId].push(btn);
+    btn.setAttribute("aria-pressed", "false");
+    btn.addEventListener("click", () => {
+      const panel = document.getElementById(targetId);
+      if(!panel) return;
+      if(panel.classList.contains("is-open")){
+        closePanel(panel);
+      } else {
+        openPanel(panel);
+      }
+    });
+  });
+
+  const missionPanel = document.getElementById("panel_mission");
+  if(missionPanel) openPanel(missionPanel);
 
   /* =========================================================
      0) Utilities
@@ -569,10 +990,12 @@
   const CAP = {
     antsPerTeam: 180,
     worms: 6,
+    mealworms: 12,
     beetles: 8,
     beetleEggs: 16,
     resources: 900
   };
+  const isProteinResource = (kind) => kind === "protein" || kind === "milk";
 
   function addRes(kind, x,y, mass, energy){
     if(resources.length >= CAP.resources) return null;
@@ -614,6 +1037,7 @@
     if(r.kind==="leaf") return "L";
     if(r.kind==="leafBit") return "l";
     if(r.kind==="protein") return "P";
+    if(r.kind==="milk") return "m";
     if(r.kind==="spore") return "*";
     if(r.kind==="dirt") return ".";
     if(r.kind==="corpseAnt") return "a";
@@ -624,6 +1048,7 @@
   function resColor(r){
     if(r.kind==="leaf" || r.kind==="leafBit") return getComputedStyle(document.documentElement).getPropertyValue("--leaf").trim();
     if(r.kind==="protein") return getComputedStyle(document.documentElement).getPropertyValue("--protein").trim();
+    if(r.kind==="milk") return getComputedStyle(document.documentElement).getPropertyValue("--milk").trim();
     if(r.kind==="spore") return getComputedStyle(document.documentElement).getPropertyValue("--spore").trim();
     if(r.kind==="dirt") return getComputedStyle(document.documentElement).getPropertyValue("--dirt").trim();
     if(r.kind==="corpseAnt") return "rgb(170,120,120)";
@@ -1017,7 +1442,7 @@
 
     const r = resources.find(rr => rr.id === a.carried && !rr.dead);
     if(r){
-      if(r.kind==="protein"){
+      if(isProteinResource(r.kind)){
         col.foodStore += r.energy;
       } else if(r.kind==="leafBit" || r.kind==="leaf"){
         // substrate store is energy plus some mass (mass is for later room growth visuals)
@@ -1273,7 +1698,7 @@
         continue;
       }
 
-      // Drone jobs: haul leafBits, spores, corpses, protein
+      // Drone jobs: haul leafBits, spores, corpses, protein/milk
       const pop = colonyPop(col.team);
       const foodTarget = 10 + pop * CFG.foodTargetPerAnt;
       const subTarget  = 8 + pop * CFG.subTargetPerAnt;
@@ -1287,7 +1712,7 @@
         if(r.kind==="dirt") return false;
         if(r.kind==="leaf") return false;        // scouts handle big leaves
         if(r.kind==="leafBit") return needSub || (Math.random() < 0.35);
-        if(r.kind==="protein") return needFood || (Math.random() < 0.25);
+        if(isProteinResource(r.kind)) return needFood || (Math.random() < 0.25);
         if(r.kind==="spore") return true;
         if(r.kind==="corpseBeetle" || r.kind==="corpseAnt" || r.kind==="wormSeg") return true;
         return false;
@@ -1302,7 +1727,7 @@
 
         // pick up
         if(target.mass > carryCapacity(a)){
-          // drones are not leaf cutters, so only cut if it's leafBit or protein (rare), mostly skip
+          // drones are not leaf cutters, so only cut if it's leafBit or protein/milk (rare), mostly skip
           wanderAnt(a);
           spendEnergy(a, st.moveE);
           continue;
@@ -1372,17 +1797,17 @@
         continue;
       }
 
-      // On surface: search for leaves and protein, cut leaves to bits
+      // On surface: search for leaves and protein/milk, cut leaves to bits
       if(a.y === SURFACE_WALK_Y){
         // slight roaming
         if(Math.random() < 0.55) a.x = clamp(a.x + (Math.random()<0.5?-1:1), 1, W-2);
 
-        // seek nearest leaf or protein
+        // seek nearest leaf or protein/milk
         const target = findNearestRes(a.x,a.y, (r) => {
           if(!canCarry(a)) return false;
           if(r.kind==="leaf") return true;
           if(r.kind==="leafBit") return true;
-          if(r.kind==="protein") return needFood || (Math.random() < 0.25);
+          if(isProteinResource(r.kind)) return needFood || (Math.random() < 0.25);
           if(r.kind==="spore") return true;
           return false;
         }, 22);
@@ -1418,7 +1843,7 @@
             continue;
           }
 
-          // leafBit or protein
+          // leafBit or protein/milk
           if(target.mass <= carryCapacity(a)){
             a.carried = target.id;
             spendEnergy(a, st.moveE*0.25);
@@ -1674,6 +2099,7 @@
   }
 
   const mobs = [];
+  let mealwormMilk = 0;
   function backfillSoilOnlyIfSafe(x,y){
     if(!inb(x,y)) return;
     if(tileAt(x,y) !== TILE.TUNNEL) return;
@@ -1708,6 +2134,23 @@
     for(let i=0;i<n;i++){
       addRes("wormSeg", x + irand(-1,1), y + irand(-1,1), 2.5, 0.0);
     }
+  }
+  function spawnMealworm(){
+    const n = mobs.filter(m => m.type==="mealworm" && !m.dead).length;
+    if(n >= CAP.mealworms) return;
+    const x = clamp(irand(6, W-6), 2, W-3);
+    mobs.push({
+      type:"mealworm",
+      x,
+      y:SURFACE_WALK_Y,
+      hp:24,
+      hpMax:24,
+      hunger:1,
+      captured:false,
+      penOwner:0,
+      milkTimer:6 + Math.random()*4,
+      dead:false
+    });
   }
 
   function stepMobGreedy(m, tx, ty){
@@ -1897,15 +2340,86 @@
     }
   }
 
+  function stepMealworm(m, dt, nightNow){
+    if(m.dead) return;
+
+    m.hunger = clamp(m.hunger - dt * (nightNow ? 0.030 : 0.015), 0, 1);
+    if(m.hunger <= 0){
+      m.hp -= dt * 4.5;
+      if(m.hp <= 0){
+        m.dead = true;
+        addRes("protein", m.x, m.y, 1.4, 5.5);
+        return;
+      }
+    } else {
+      m.hp = Math.min(m.hp + dt * 0.6, m.hpMax);
+    }
+
+    if(m.captured){
+      if(tileAt(m.x,m.y) !== TILE.TUNNEL || getOwner(m.x,m.y) === 0){
+        m.captured = false;
+        m.penOwner = 0;
+      } else {
+        const light = surfaceLight01AtX(m.x);
+        m.milkTimer -= dt * (0.40 + light * 0.9);
+        if(m.milkTimer <= 0){
+          const drop = addRes("milk", clamp(m.x + irand(-1,1), 1, W-2), Math.min(m.y, H-2), 0.7, 3.0);
+          if(drop) drop.team = getOwner(m.x,m.y) - 1;
+          mealwormMilk += 1;
+          m.milkTimer = 6 + Math.random()*5;
+        }
+        if(Math.random() < 0.35){
+          mobWander(m);
+          if(m.y < SURFACE_WALK_Y+1) m.y = SURFACE_WALK_Y+1;
+        }
+        m.hunger = clamp(m.hunger + dt * 0.08, 0, 1);
+        return;
+      }
+    }
+
+    // surface roaming
+    if(Math.random() < 0.75){
+      const dir = (Math.random() < 0.5) ? -1 : 1;
+      m.x = clamp(m.x + dir, 2, W-3);
+    }
+    m.y = SURFACE_WALK_Y;
+
+    const leaf = resourceAt(m.x, SURFACE_WALK_Y, r => r.kind==="leaf" && r.mass>0.4);
+    if(leaf){
+      const bite = Math.min(leaf.mass, 0.35 + Math.random()*0.2);
+      leaf.mass -= bite;
+      if(leaf.mass <= 0.2) leaf.dead = true;
+      m.hunger = clamp(m.hunger + bite*0.2, 0, 1);
+    }
+
+    const light = surfaceLight01AtX(m.x);
+    if(light > 0.55 && Math.random() < dt*0.18){
+      const drop = addRes("milk", m.x, SURFACE_WALK_Y, 0.5, 2.0);
+      if(drop) drop.team = -1;
+      mealwormMilk += 0.35;
+    }
+
+    const penY = SURFACE_WALK_Y + 1;
+    if(tileAt(m.x, penY) === TILE.TUNNEL && getOwner(m.x, penY)!==0 && Math.random() < dt*0.45){
+      m.captured = true;
+      m.penOwner = getOwner(m.x, penY);
+      m.x = m.x;
+      m.y = penY;
+      m.milkTimer = 5 + Math.random()*4;
+    }
+  }
+
   /* =========================================================
      16) Spawners
   ========================================================= */
   let beetleSpawnCD = 0;
   let wormSpawnCD = 0;
+  let mealwormSpawnCD = 0;
 
   function spawners(dt){
     beetleSpawnCD = Math.max(0, beetleSpawnCD - dt);
     wormSpawnCD = Math.max(0, wormSpawnCD - dt);
+    mealwormSpawnCD = Math.max(0, mealwormSpawnCD - dt);
 
     const nightNow = isNight();
 
@@ -1921,6 +2435,11 @@
         spawnWorm();
         wormSpawnCD = 22 + Math.random()*24;
       } else wormSpawnCD = 12 + Math.random()*16;
+    }
+
+    if(mealwormSpawnCD <= 0){
+      spawnMealworm();
+      mealwormSpawnCD = nightNow ? (24 + Math.random()*18) : (14 + Math.random()*10);
     }
   }
 
@@ -2759,6 +3278,10 @@
           ctx.fillText(".", s.sx + camera.scale*0.5, s.sy + camera.scale*0.55);
           ctx.globalAlpha = 1;
         }
+      } else if(m.type==="mealworm"){
+        const s = worldToScreen(m.x, m.y);
+        ctx.fillStyle = m.captured ? "rgb(255,214,160)" : "rgb(255,185,120)";
+        ctx.fillText(m.captured ? "M" : "m", s.sx + camera.scale*0.5, s.sy + camera.scale*0.55);
       }
     }
 
@@ -2786,16 +3309,19 @@
   const st_orange = document.getElementById("st_orange");
   const st_cyan = document.getElementById("st_cyan");
   const st_worm = document.getElementById("st_worm");
+  const st_mealworm = document.getElementById("st_mealworm");
   const st_beetle = document.getElementById("st_beetle");
 
   const s_orange = document.getElementById("s_orange");
   const s_cyan = document.getElementById("s_cyan");
   const s_worm = document.getElementById("s_worm");
+  const s_mealworm = document.getElementById("s_mealworm");
   const s_beetle = document.getElementById("s_beetle");
 
   const chkSO = document.getElementById("chkSO");
   const chkSC = document.getElementById("chkSC");
   const chkSW = document.getElementById("chkSW");
+  const chkSM = document.getElementById("chkSM");
   const chkSB = document.getElementById("chkSB");
 
   function updateStatus(){
@@ -2808,6 +3334,8 @@
     const worms = mobs.filter(m => m.type==="worm" && !m.dead).length;
     const beetles = mobs.filter(m => m.type==="beetle" && !m.dead).length;
     const eggs = mobs.filter(m => m.type==="beetleEgg" && !m.dead).length;
+    const mealwormList = mobs.filter(m => m.type==="mealworm" && !m.dead);
+    const penned = mealwormList.filter(m => m.captured).length;
 
     const nightNow = isNight();
     const light = surfaceLight01AtX(camera.x);
@@ -2837,9 +3365,13 @@
     st_beetle.innerHTML =
       `Beetles <span class="pill">${beetles}</span> <span class="pill">eggs ${eggs}</span> <span class="pill">light ${light.toFixed(2)}</span> <span class="pill">cfg ${fmtCfg()}</span>`;
 
+    st_mealworm.innerHTML =
+      `Mealworms <span class="pill">${mealwormList.length}</span> <span class="pill">penned ${penned}</span> <span class="pill">milk ${mealwormMilk.toFixed(1)}</span>`;
+
     s_orange.style.display = chkSO.checked ? "flex" : "none";
     s_cyan.style.display   = chkSC.checked ? "flex" : "none";
     s_worm.style.display   = chkSW.checked ? "flex" : "none";
+    s_mealworm.style.display = chkSM.checked ? "flex" : "none";
     s_beetle.style.display = chkSB.checked ? "flex" : "none";
   }
 
@@ -2872,6 +3404,7 @@
     for(let i=0;i<digDisturb.length;i++) digDisturb[i]=0;
     for(let i=0;i<rainLeach.length;i++) rainLeach[i]=0;
     wormAlertT = 0;
+    mealwormMilk = 0;
     prevRainActive = false;
 
     genWorld();
@@ -2885,6 +3418,8 @@
 
     beetleSpawnCD = 8 + Math.random()*10;
     wormSpawnCD = 12 + Math.random()*12;
+    mealwormSpawnCD = 6 + Math.random()*6;
+    spawnMealworm();
 
     labParams.textContent = `Tuning: ${fmtCfg()}`;
   }
@@ -2928,6 +3463,7 @@
       if(m.type==="beetle") stepBeetle(m, dt, nightNow);
       else if(m.type==="worm") stepWorm(m, dt, nightNow);
       else if(m.type==="beetleEgg") stepBeetleEgg(m, dt, nightNow);
+      else if(m.type==="mealworm") stepMealworm(m, dt, nightNow);
     }
     for(let i=mobs.length-1;i>=0;i--) if(mobs[i].dead) mobs.splice(i,1);
 
