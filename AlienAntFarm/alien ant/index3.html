@@ -1,0 +1,2239 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Alien Ant Farm Simulator</title>
+  <style>
+    :root{
+      --bg:#0b1020;
+      --panel:#121a2f;
+      --panel2:#0f1628;
+      --text:#e8eefc;
+      --muted:#9fb0da;
+      --accent:#7ae7ff;
+      --danger:#ff6b6b;
+      --ok:#6bff9c;
+    }
+    html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,sans-serif;overflow:hidden;}
+    canvas{display:block;width:100vw;height:100vh;}
+
+    #statusBar{
+      position:fixed;left:0;top:0;right:0;
+      background:rgba(10,14,26,0.78);
+      border-bottom:1px solid rgba(255,255,255,0.08);
+      padding:6px 10px 7px 10px;
+      font:12px/1.2 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;
+      user-select:none;
+      z-index:10;
+      backdrop-filter: blur(6px);
+    }
+    #statusBar .row{display:flex;gap:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    #statusBar .tag{opacity:0.9; padding:1px 6px;border-radius:999px;background:rgba(255,255,255,0.07);}
+    #statusBar .orange{color:#ffb44d}
+    #statusBar .cyan{color:#57d6ff}
+    #statusBar .worm{color:#bfbfbf}
+    #statusBar .beetle{color:#a6ff7a}
+    #statusBar .hint{color:var(--muted)}
+    #statusBar .spacer{flex:1;}
+
+    #menuToggle{
+      position:fixed;left:10px;top:72px;
+      z-index:11;
+      background:rgba(18,26,47,0.92);
+      border:1px solid rgba(255,255,255,0.12);
+      border-radius:10px;
+      padding:8px 10px;
+      color:var(--text);
+      cursor:pointer;
+      user-select:none;
+      font:12px ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;
+      backdrop-filter: blur(6px);
+    }
+    #menuToggle:hover{border-color:rgba(255,255,255,0.22);}
+
+    #menu{
+      position:fixed;
+      left:10px; top:108px;
+      width:360px;
+      max-height:calc(100vh - 128px);
+      overflow:auto;
+      z-index:11;
+      background:rgba(18,26,47,0.92);
+      border:1px solid rgba(255,255,255,0.12);
+      border-radius:12px;
+      padding:10px 10px 12px 10px;
+      display:none;
+      backdrop-filter: blur(8px);
+      box-shadow:0 12px 30px rgba(0,0,0,0.35);
+    }
+    #menu h2{
+      margin:8px 0 6px 0;
+      font-size:12px;
+      font-weight:700;
+      letter-spacing:0.04em;
+      text-transform:uppercase;
+      color:#cfe0ff;
+      opacity:0.92;
+    }
+    #menu .section{padding:8px 8px 10px 8px;border-radius:10px;background:rgba(15,22,40,0.62);border:1px solid rgba(255,255,255,0.06);margin-bottom:10px;}
+    #menu .row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:7px 0;}
+    #menu label{font:12px ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;color:var(--text);opacity:0.95;}
+    #menu input[type="range"]{width:180px;}
+    #menu input[type="checkbox"]{transform:scale(1.05);}
+    #menu button{
+      font:12px ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;
+      background:rgba(255,255,255,0.08);
+      border:1px solid rgba(255,255,255,0.12);
+      color:var(--text);
+      border-radius:10px;
+      padding:8px 10px;
+      cursor:pointer;
+    }
+    #menu button:hover{border-color:rgba(255,255,255,0.24);}
+    #menu .muted{color:var(--muted);}
+    #menu .small{font-size:11px;color:var(--muted);line-height:1.25;}
+    #menu .codeBox{
+      font:11px ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;
+      background:rgba(0,0,0,0.25);
+      border:1px solid rgba(255,255,255,0.10);
+      border-radius:10px;
+      padding:8px;
+      word-break:break-all;
+      color:#dbe7ff;
+      white-space:pre-wrap;
+    }
+
+    #overlay{
+      position:fixed;inset:0;
+      display:none;
+      z-index:20;
+      background:rgba(0,0,0,0.55);
+      backdrop-filter: blur(6px);
+      align-items:center;
+      justify-content:center;
+      padding:20px;
+    }
+    #overlay .card{
+      width:min(820px, 96vw);
+      background:rgba(18,26,47,0.96);
+      border:1px solid rgba(255,255,255,0.12);
+      border-radius:16px;
+      padding:18px 18px 16px 18px;
+      box-shadow:0 20px 50px rgba(0,0,0,0.45);
+    }
+    #overlay .title{
+      font-weight:800;
+      letter-spacing:0.04em;
+      text-transform:uppercase;
+      font-size:34px;
+      margin:2px 0 6px 0;
+    }
+    #overlay .title.win{color:var(--ok);}
+    #overlay .title.lose{color:var(--danger);}
+    #overlay .sub{color:var(--muted);font:12px ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;margin-bottom:10px;}
+    #overlay .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:10px;}
+    #overlay button{padding:10px 12px;border-radius:12px;}
+  </style>
+</head>
+<body>
+  <canvas id="c"></canvas>
+
+  <div id="statusBar">
+    <div class="row" id="rowOrange"></div>
+    <div class="row" id="rowCyan"></div>
+    <div class="row" id="rowWorms"></div>
+    <div class="row" id="rowBeetles"></div>
+  </div>
+
+  <div id="menuToggle">Menu (M)</div>
+
+  <div id="menu">
+    <div class="section">
+      <h2>Tools</h2>
+      <div class="row">
+        <button id="btnDropFood">Drop Food Pack (D)</button>
+        <button id="btnReset">Reset (R)</button>
+      </div>
+      <div class="small">
+        Food packs inject energy. Leaves are substrate for compost and mushrooms. Mealworms can produce milk only with light.
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>View</h2>
+      <div class="row">
+        <label>Zoom</label>
+        <input id="rngZoom" type="range" min="0.6" max="4.0" step="0.01" value="1.4" />
+      </div>
+      <div class="row">
+        <label>Show pheromones</label>
+        <input id="chkPhero" type="checkbox" checked />
+      </div>
+      <div class="row">
+        <label>Show debug</label>
+        <input id="chkDebug" type="checkbox" />
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>Balance</h2>
+      <div class="row">
+        <label>Solar intensity</label>
+        <input id="rngSolar" type="range" min="0.25" max="1.0" step="0.01" value="0.60" />
+      </div>
+      <div class="row">
+        <label>Pheromone half-life</label>
+        <input id="rngHL" type="range" min="4" max="24" step="1" value="14" />
+      </div>
+      <div class="row">
+        <label>Worm smell depth</label>
+        <input id="rngWormDepth" type="range" min="18" max="44" step="1" value="32" />
+      </div>
+      <div class="small">
+        Worms are gated until a warrior exists. Smell depth is how deep you must dig before they care.
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>Audio</h2>
+      <div class="row">
+        <label>Background bass</label>
+        <input id="chkAudio" type="checkbox" />
+      </div>
+      <div class="row">
+        <label>Volume</label>
+        <input id="rngVol" type="range" min="0" max="1" step="0.01" value="0.35" />
+      </div>
+      <div class="small muted">Audio defaults off. Most browsers require a click first.</div>
+    </div>
+
+    <div class="section">
+      <h2>Codes</h2>
+      <div class="row">
+        <button id="btnCopyCode">Copy End Code</button>
+        <button id="btnCopyLab">Copy Tune Code</button>
+      </div>
+      <div class="small muted">End code helps diagnose what happened. Tune code captures balancing knobs.</div>
+      <div class="codeBox" id="codeOut">AAS1-...</div>
+    </div>
+  </div>
+
+  <div id="overlay">
+    <div class="card">
+      <div id="ovTitle" class="title">WIN</div>
+      <div id="ovSub" class="sub"></div>
+      <div class="codeBox" id="ovCode"></div>
+      <div class="row">
+        <button id="ovCopy">Copy Code</button>
+        <button id="ovReset">Reset</button>
+        <button id="ovClose">Close</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  "use strict";
+
+  /* -----------------------------
+     Utils
+     ----------------------------- */
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const lerp  = (a, b, t) => a + (b - a) * t;
+
+  const B36 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  function toB36(n) {
+    n = Math.max(0, Math.floor(n));
+    if (n === 0) return "0";
+    let s = "";
+    while (n > 0) { s = B36[n % 36] + s; n = Math.floor(n / 36); }
+    return s;
+  }
+  function fromB36(s) {
+    let n = 0;
+    for (let i = 0; i < s.length; i++) n = n * 36 + B36.indexOf(s[i]);
+    return n;
+  }
+
+  function safeRemove(arr, item){
+    const i = arr.indexOf(item);
+    if (i >= 0) { arr.splice(i, 1); return true; }
+    return false;
+  }
+
+  class RNG {
+    constructor(seed=123456789) { this.s = seed >>> 0; }
+    next() { this.s = (1664525 * this.s + 1013904223) >>> 0; return this.s; }
+    f() { return (this.next() & 0xFFFFFF) / 0x1000000; }
+    i(a, b) { return Math.floor(lerp(a, b + 1, this.f())); }
+    pick(arr) { return arr[Math.floor(this.f() * arr.length)]; }
+  }
+
+  /* -----------------------------
+     Canvas / DPR / Camera
+     - Camera stored in tile coordinates cam.tx / cam.ty
+     ----------------------------- */
+  const canvas = document.getElementById("c");
+  const ctx = canvas.getContext("2d");
+
+  let DPR = 1;
+  function resize() {
+    DPR = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+    canvas.width = Math.floor(innerWidth * DPR);
+    canvas.height = Math.floor(innerHeight * DPR);
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+  }
+  addEventListener("resize", resize);
+  resize();
+
+  const TILE = 7;
+  const cam = { tx: 0, ty: 0, zoom: 1.4, dragging:false, px:0, py:0 };
+  function ts(){ return TILE * cam.zoom; }
+
+  canvas.addEventListener("mousedown", (e) => {
+    cam.dragging = true;
+    cam.px = e.clientX;
+    cam.py = e.clientY;
+  });
+  addEventListener("mouseup", () => cam.dragging = false);
+  addEventListener("mousemove", (e) => {
+    if (!cam.dragging) return;
+    const dx = e.clientX - cam.px;
+    const dy = e.clientY - cam.py;
+    cam.px = e.clientX;
+    cam.py = e.clientY;
+    cam.tx -= dx / ts();
+    cam.ty -= dy / ts();
+  });
+
+  canvas.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const oldTs = ts();
+    const nz = clamp(cam.zoom * (e.deltaY < 0 ? 1.08 : 0.92), 0.6, 4.0);
+    const newTs = TILE * nz;
+
+    const mx = e.clientX, my = e.clientY;
+    const wx = cam.tx + mx / oldTs;
+    const wy = cam.ty + my / oldTs;
+
+    cam.zoom = nz;
+    cam.tx = wx - mx / newTs;
+    cam.ty = wy - my / newTs;
+
+    rngZoom.value = String(nz);
+  }, { passive:false });
+
+  /* -----------------------------
+     UI
+     ----------------------------- */
+  const menuToggle = document.getElementById("menuToggle");
+  const menu = document.getElementById("menu");
+
+  const btnDropFood = document.getElementById("btnDropFood");
+  const btnReset = document.getElementById("btnReset");
+  const rngZoom = document.getElementById("rngZoom");
+  const chkPhero = document.getElementById("chkPhero");
+  const chkDebug = document.getElementById("chkDebug");
+  const rngSolar = document.getElementById("rngSolar");
+  const rngHL = document.getElementById("rngHL");
+  const rngWormDepth = document.getElementById("rngWormDepth");
+  const chkAudio = document.getElementById("chkAudio");
+  const rngVol = document.getElementById("rngVol");
+  const btnCopyCode = document.getElementById("btnCopyCode");
+  const btnCopyLab = document.getElementById("btnCopyLab");
+  const codeOut = document.getElementById("codeOut");
+
+  const rowOrange = document.getElementById("rowOrange");
+  const rowCyan = document.getElementById("rowCyan");
+  const rowWorms = document.getElementById("rowWorms");
+  const rowBeetles = document.getElementById("rowBeetles");
+
+  const overlay = document.getElementById("overlay");
+  const ovTitle = document.getElementById("ovTitle");
+  const ovSub = document.getElementById("ovSub");
+  const ovCode = document.getElementById("ovCode");
+  const ovCopy = document.getElementById("ovCopy");
+  const ovReset = document.getElementById("ovReset");
+  const ovClose = document.getElementById("ovClose");
+
+  menuToggle.addEventListener("click", () => {
+    menu.style.display = (menu.style.display === "none" || !menu.style.display) ? "block" : "none";
+  });
+
+  rngZoom.addEventListener("input", () => cam.zoom = parseFloat(rngZoom.value));
+  btnDropFood.addEventListener("click", () => dropFoodPack());
+  btnReset.addEventListener("click", () => reset());
+
+  addEventListener("keydown", (e) => {
+    if (e.key === "m" || e.key === "M") menuToggle.click();
+    if (e.key === "d" || e.key === "D") dropFoodPack();
+    if (e.key === "r" || e.key === "R") reset();
+  });
+
+  /* -----------------------------
+     Simple bass audio (default off)
+     ----------------------------- */
+  let audio = { ctx:null, gain:null, osc:null, lfo:null, lfoGain:null, on:false };
+  function audioOn() {
+    if (audio.on) return;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    if (!audio.ctx) {
+      audio.ctx = new AC();
+      audio.gain = audio.ctx.createGain();
+      audio.gain.gain.value = 0.0;
+      audio.gain.connect(audio.ctx.destination);
+
+      audio.osc = audio.ctx.createOscillator();
+      audio.osc.type = "sawtooth";
+      audio.osc.frequency.value = 55;
+
+      audio.lfo = audio.ctx.createOscillator();
+      audio.lfo.type = "sine";
+      audio.lfo.frequency.value = 0.25;
+
+      audio.lfoGain = audio.ctx.createGain();
+      audio.lfoGain.gain.value = 18;
+
+      audio.lfo.connect(audio.lfoGain);
+      audio.lfoGain.connect(audio.osc.frequency);
+
+      audio.osc.connect(audio.gain);
+      audio.osc.start();
+      audio.lfo.start();
+    }
+    audio.on = true;
+    audio.gain.gain.value = parseFloat(rngVol.value) * 0.12;
+  }
+  function audioOff() {
+    audio.on = false;
+    if (audio.gain) audio.gain.gain.value = 0.0;
+  }
+  chkAudio.addEventListener("change", () => {
+    if (chkAudio.checked) audioOn(); else audioOff();
+  });
+  rngVol.addEventListener("input", () => {
+    if (audio.gain) audio.gain.gain.value = (audio.on ? parseFloat(rngVol.value) * 0.12 : 0.0);
+  });
+
+  /* -----------------------------
+     World constants
+     ----------------------------- */
+  const W = 220;
+  const H = 140;
+  const surfaceY = 40;
+
+  const TILE_AIR = 0;
+  const TILE_SOIL = 1;
+  const TILE_TUNNEL = 2;
+  const TILE_ROCK_S = 3;
+  const TILE_ROCK_M = 4;
+  const TILE_ROCK_L = 5;
+
+  const DIRS = [{x:1,y:0},{x:-1,y:0},{x:0,y:1},{x:0,y:-1}];
+
+  const CAP = {
+    antsPerColony: 220,
+    worms: 8,
+    beetles: 14,
+    beetlesSurfaceMax: 2,
+    mealworms: 8,
+    leaves: 80,
+    pellets: 240,
+    mushrooms: 160
+  };
+
+  const CASTE = {
+    QUEEN: "QUEEN",
+    DRONE: "DRONE",
+    SCOUT: "SCOUT",
+    DIGGER: "DIGGER",
+    WARRIOR: "WARRIOR",
+    HUNTER: "HUNTER"
+  };
+
+  // Everything is a string, single char or multi char is valid.
+  const SPR = {
+    queen:  "000000:",
+    drone:  "XX",
+    scout:  "><",
+    digger: "TT",
+    warrior:"KKKK",
+    hunter: "HHHH",
+    beetle: "CD",
+    meal:   "====",
+    spider: "A8",
+    worm:   "########"
+  };
+
+  const TUNE = {
+    solar: 0.60,
+    phHalfLife: 14,
+    wormSmellDepth: 32,
+    leafMult: 1.25,
+    mushEff: 0.82,
+    scoutPct: 0.18,
+    diggerPct: 0.26
+  };
+
+  const STAT = {
+    [CASTE.QUEEN]:  { hpMax:30, eMax:120, upkeepE:0.10, moveE:0.00, carry:0 },
+    [CASTE.DRONE]:  { hpMax:10, eMax:18,  upkeepE:0.06, moveE:0.055, carry:2 },
+    [CASTE.SCOUT]:  { hpMax:10, eMax:18,  upkeepE:0.06, moveE:0.060, carry:1 },
+    [CASTE.DIGGER]: { hpMax:12, eMax:18,  upkeepE:0.065,moveE:0.060, carry:2 },
+    [CASTE.WARRIOR]:{ hpMax:50, eMax:24,  upkeepE:0.075,moveE:0.070, carry:4 },
+    [CASTE.HUNTER]: { hpMax:70, eMax:22,  upkeepE:0.090,moveE:0.075, carry:0 }
+  };
+
+  function digCost(caste){
+    if (caste === CASTE.DIGGER) return 0.65;
+    if (caste === CASTE.DRONE) return 0.85;
+    if (caste === CASTE.WARRIOR) return 0.95;
+    if (caste === CASTE.SCOUT) return 1.15;
+    return 1.0;
+  }
+
+  const idx = (x,y) => x + y * W;
+
+  let tile = new Uint8Array(W * H);
+  let tunnelTag = new Uint8Array(W * H); // 0 none, 1 ant, 2 beetle, 3 worm
+  let moisture = new Float32Array(W * H);
+  let light = new Float32Array(W * H);
+  let filth = new Float32Array(W * H);
+
+  let phO_home, phO_food, phO_dang;
+  let phC_home, phC_food, phC_dang;
+  let phSpider;
+
+  function allocPheromones(){
+    phO_home = new Float32Array(W*H);
+    phO_food = new Float32Array(W*H);
+    phO_dang = new Float32Array(W*H);
+    phC_home = new Float32Array(W*H);
+    phC_food = new Float32Array(W*H);
+    phC_dang = new Float32Array(W*H);
+    phSpider = new Float32Array(W*H);
+  }
+
+  const resources = {
+    leaves: [],
+    pellets: [],
+    mushrooms: [],
+    foodPacks: [],
+    corpses: []
+  };
+
+  let rooms = []; // {id, owner, x0,y0,x1,y1, type, compostE, mushE, light, moisture}
+
+  function roomAt(x,y){
+    for (let r of rooms){
+      if (x>=r.x0 && x<=r.x1 && y>=r.y0 && y<=r.y1) return r;
+    }
+    return null;
+  }
+  function isRoomTile(x,y){ return roomAt(x,y) !== null; }
+
+  /* -----------------------------
+     Tile validation helpers
+     ----------------------------- */
+  function isSurface(y){ return y === surfaceY; }
+  function inBounds(x,y){ return x>=1 && x<=W-2 && y>=surfaceY && y<=H-2; }
+
+  function canBeetleEnter(x,y){
+    if (!inBounds(x,y)) return false;
+    if (isSurface(y)) return true;
+    const t = tile[idx(x,y)];
+    return (t === TILE_TUNNEL || t === TILE_SOIL);
+  }
+
+  function canWormEnter(x,y){
+    if (!inBounds(x,y)) return false;
+    if (isSurface(y)) return true;
+    const t = tile[idx(x,y)];
+    if (t === TILE_SOIL || t === TILE_TUNNEL) return true;
+    if (t === TILE_ROCK_S) return true;
+    return false;
+  }
+
+  /* -----------------------------
+     Dig helpers with ownership tags
+     ----------------------------- */
+  function digTileBy(x,y, tag){
+    const i = idx(x,y);
+    if (tile[i] === TILE_SOIL){
+      tile[i] = TILE_TUNNEL;
+      tunnelTag[i] = tag;
+      return true;
+    }
+    if (tile[i] === TILE_ROCK_S && tag === 3){
+      // worms can push through small rock
+      tile[i] = TILE_TUNNEL;
+      tunnelTag[i] = tag;
+      return true;
+    }
+    return false;
+  }
+
+  /* -----------------------------
+     Weather
+     ----------------------------- */
+  const weather = {
+    tod: 0.15,
+    todSpeed: 1/220,
+    nightFactor: 0.0,
+    sunFactor: 1.0,
+    cloudCover: 0.0,
+    raining: false,
+    rainT: 0,
+    lastRainEnd: -999
+  };
+  let clouds = [];
+  let stars = [];
+
+  /* -----------------------------
+     Entities
+     ----------------------------- */
+  class Colony {
+    constructor(name, color, homeX) {
+      this.name = name;
+      this.color = color;
+      this.homeX = homeX;
+      this.ants = [];
+      this.queen = null;
+
+      this.storeFoodE = 10;
+      this.storeFungusE = 0;
+      this.storeMilkE = 0;
+      this.storeSubstrate = 0;
+
+      this.hasWarrior = false;
+      this.hasHunter = false;
+      this.secondQueenDeployed = false;
+
+      this.entrance = { x: homeX, y: surfaceY };
+      this.nest = { x: homeX, y: surfaceY + 8 };
+
+      this.wantRunner = true;
+      this.lastLayT = 0;
+
+      this.counts = { DRONE:0, SCOUT:0, DIGGER:0, WARRIOR:0, HUNTER:0 };
+      this.deepestDig = 0;
+    }
+
+    recomputeCounts(){
+      this.counts = { DRONE:0, SCOUT:0, DIGGER:0, WARRIOR:0, HUNTER:0 };
+      for (let a of this.ants){
+        if (a.caste === CASTE.QUEEN || a.dead) continue;
+        this.counts[a.caste] = (this.counts[a.caste]||0) + 1;
+      }
+      this.hasWarrior = (this.counts.WARRIOR||0) > 0;
+      this.hasHunter = (this.counts.HUNTER||0) > 0;
+    }
+
+    totalAntsAlive(){
+      return this.ants.filter(a => !a.dead).length;
+    }
+
+    tryDeploySecondQueen(){
+      if (this.secondQueenDeployed) return;
+      this.recomputeCounts();
+      const total = this.totalAntsAlive();
+      const stored = this.storeFoodE + this.storeFungusE + this.storeMilkE;
+      const sub = this.storeSubstrate;
+
+      const hasMush = rooms.some(r => r.owner === this.name && r.type === "MUSHROOM" && (r.mushE > 4.0 || r.light > 0.22));
+      const enoughWar = (this.counts.WARRIOR||0) >= 4;
+      const enoughHun = (this.counts.HUNTER||0) >= 1;
+
+      if (total >= 120 && hasMush && enoughWar && enoughHun && stored >= 90 && sub >= 40){
+        this.secondQueenDeployed = true;
+      }
+    }
+
+    queenTick(t, dt){
+      const q = this.queen;
+      if (!q || q.dead) return;
+
+      if (q.e <= 0){
+        if (this.storeFoodE > 0){
+          const take = Math.min(this.storeFoodE, 0.9 * dt);
+          this.storeFoodE -= take;
+          q.e += take * 0.9;
+        } else if (this.storeFungusE > 0){
+          const take = Math.min(this.storeFungusE, 0.8 * dt);
+          this.storeFungusE -= take;
+          q.e += take * 0.8;
+        } else if (this.storeMilkE > 0){
+          const take = Math.min(this.storeMilkE, 0.9 * dt);
+          this.storeMilkE -= take;
+          q.e += take * 0.9;
+        }
+      }
+
+      q.e -= STAT[CASTE.QUEEN].upkeepE * dt;
+      if (q.e < 0){
+        q.hp += q.e * 3.0;
+        q.e = 0;
+      }
+      if (q.e > 0 && q.hp < STAT[CASTE.QUEEN].hpMax) {
+        q.hp = Math.min(STAT[CASTE.QUEEN].hpMax, q.hp + dt * 0.35);
+      }
+      if (q.hp <= 0){
+        q.dead = true;
+        q.hp = 0;
+        return;
+      }
+
+      this.tryDeploySecondQueen();
+
+      const stored = this.storeFoodE + this.storeFungusE + this.storeMilkE;
+      const hungry = stored < 10;
+
+      this.recomputeCounts();
+
+      const hasMushRoom = rooms.some(r => r.owner === this.name && r.type === "MUSHROOM" && r.mushE > 0.1);
+      if (this.storeSubstrate > 12 && hasMushRoom) this.wantRunner = false;
+      else this.wantRunner = true;
+
+      const eggCost = 2.2;
+      const layCooldown = hungry ? 2.2 : 1.5;
+      if (t - this.lastLayT < layCooldown) return;
+
+      let available = this.storeFoodE;
+      if (available < eggCost && this.storeFungusE > 0) available += this.storeFungusE * 0.9;
+      if (available < eggCost && this.storeMilkE > 0) available += this.storeMilkE * 0.9;
+      if (available < eggCost) return;
+
+      let remaining = eggCost;
+      const spend = (key, mult) => {
+        const take = Math.min(this[key], remaining / mult);
+        this[key] -= take;
+        remaining -= take * mult;
+      };
+      spend("storeMilkE", 1.0);
+      spend("storeFungusE", 0.9);
+      spend("storeFoodE", 1.0);
+      if (remaining > 0.001) return;
+
+      this.lastLayT = t;
+
+      const nonQ = this.totalAntsAlive() - 1;
+      const scouts = this.counts.SCOUT || 0;
+      const diggers = this.counts.DIGGER || 0;
+      const warriors = this.counts.WARRIOR || 0;
+      const hunters = this.counts.HUNTER || 0;
+
+      let caste = CASTE.DRONE;
+
+      const desiredScout = clamp(TUNE.scoutPct, 0.05, 0.35);
+      const desiredDigger = clamp(TUNE.diggerPct, 0.10, 0.45);
+
+      if (nonQ < 2) caste = CASTE.DIGGER;
+      else if (nonQ < 5 && scouts / Math.max(1, nonQ) < desiredScout) caste = CASTE.SCOUT;
+      else if (diggers / Math.max(1, nonQ) < desiredDigger) caste = CASTE.DIGGER;
+      else if (stored > 22 && nonQ > 10 && (this.storeFoodE + this.storeFungusE) > 28) caste = CASTE.WARRIOR;
+      else caste = CASTE.DRONE;
+
+      if (stored > 22 && hasMushRoom && warriors >= 2 && hunters < Math.max(1, Math.floor(warriors / 3))) {
+        caste = CASTE.HUNTER;
+      }
+
+      brood.push({
+        colony: this,
+        caste,
+        x: this.nest.x,
+        y: this.nest.y,
+        tLeft: 8.0 + Math.random() * 5.0
+      });
+    }
+  }
+
+  class Ant {
+    constructor(colony, caste, x, y) {
+      this.colony = colony;
+      this.caste = caste;
+      this.x = x; this.y = y;
+      this.dir = 1;
+      this.hp = STAT[caste].hpMax;
+      this.e = STAT[caste].eMax * 0.65;
+      this.dead = false;
+
+      this.task = "IDLE";
+      this.target = null;
+      this.drag = null;
+      this.cool = 0;
+
+      this.isRunner = false;
+    }
+
+    sprite(){
+      if (this.caste === CASTE.QUEEN) return SPR.queen;
+      if (this.caste === CASTE.WARRIOR) return SPR.warrior;
+      if (this.caste === CASTE.HUNTER) return SPR.hunter;
+      if (this.caste === CASTE.DIGGER) return SPR.digger;
+      if (this.caste === CASTE.SCOUT) return SPR.scout;
+      return SPR.drone;
+    }
+
+    carryCap(){ return STAT[this.caste].carry; }
+    speedBase(){ return this.drag ? 0.70 : 1.00; }
+
+    tick(t, dt){
+      if (this.dead) return;
+      if (this.caste === CASTE.QUEEN) return;
+
+      this.e -= STAT[this.caste].upkeepE * dt;
+      if (this.e <= 0){
+        this.e = 0;
+        this.hp -= dt * 0.6;
+      }
+      if (this.hp <= 0){
+        this.dead = true;
+        this.hp = 0;
+        resources.corpses.push({x:Math.round(this.x), y:Math.round(this.y), e:0.6, kind:"ant"});
+        return;
+      }
+      if (this.e > 0 && this.hp < STAT[this.caste].hpMax) {
+        this.hp = Math.min(STAT[this.caste].hpMax, this.hp + dt * 0.15);
+      }
+
+      const col = this.colony;
+      const low = this.e < STAT[this.caste].eMax * 0.20;
+      if (low && this.task !== "EAT") {
+        this.task = "EAT";
+        this.target = {x: col.nest.x, y: col.nest.y};
+        this.drag = null;
+      }
+
+      depositPheromones(this);
+
+      this.cool -= dt;
+      if (this.cool < 0) this.cool = 0;
+
+      if (this.task === "EAT"){
+        if (dist(this.x,this.y, col.nest.x, col.nest.y) < 0.6){
+          let take = 0;
+          if (col.storeMilkE > 0){ take = Math.min(col.storeMilkE, 1.0); col.storeMilkE -= take; }
+          else if (col.storeFungusE > 0){ take = Math.min(col.storeFungusE, 0.9); col.storeFungusE -= take; }
+          else if (col.storeFoodE > 0){ take = Math.min(col.storeFoodE, 1.0); col.storeFoodE -= take; }
+          this.e = Math.min(STAT[this.caste].eMax, this.e + take);
+          this.cool = 0.25;
+          this.task = "IDLE";
+          this.target = null;
+        }
+      }
+
+      if (this.task === "IDLE" && this.cool === 0){
+        assignTask(this);
+        this.cool = 0.25 + Math.random() * 0.25;
+      }
+
+      stepTask(this, dt);
+      moveAnt(this, dt);
+    }
+  }
+
+  class Worm {
+    constructor(x,y, segs=8){
+      this.head = {x, y};
+      this.segs = [];
+      for (let i=0;i<segs;i++) this.segs.push({x, y+i});
+      this.hp = 100;
+      this.dead = false;
+      this.wantUp = false;
+      this.upTask = false;
+      this.cool = 0;
+    }
+    tick(t,dt){
+      if (this.dead) return;
+      this.cool -= dt;
+      if (this.cool < 0) this.cool = 0;
+
+      const hx = Math.round(this.head.x), hy = Math.round(this.head.y);
+      const L = light[idx(clamp(hx,0,W-1), clamp(hy,0,H-1))] || 0;
+      if (L > 0.25) this.wantUp = false;
+
+      if (weather.raining && hy <= surfaceY + 1){
+        this.hp -= dt * 18;
+      }
+
+      if (this.upTask && hy <= surfaceY + 1 && this.cool === 0){
+        const ant = nearestAnt(hx, hy, 4.0);
+        if (ant){
+          ant.hp -= dt * 6.0;
+          this.cool = 0.6;
+        }
+      }
+
+      wormMoveAndDig(this, dt);
+
+      if (this.hp <= 0){
+        this.dead = true;
+        resources.corpses.push({x:hx,y:hy,e:3.0,kind:"worm"});
+      }
+    }
+  }
+
+  class Beetle {
+    constructor(x,y){
+      this.x=x; this.y=y;
+      this.hp=30;
+      this.dead=false;
+      this.wantSurface=false;
+      this.cool=0;
+    }
+    tick(t,dt){
+      if (this.dead) return;
+      this.cool -= dt;
+      if (this.cool < 0) this.cool = 0;
+
+      const bx = Math.round(this.x), by = Math.round(this.y);
+      const L = light[idx(clamp(bx,0,W-1), clamp(by,0,H-1))] || 0;
+
+      const night = weather.nightFactor > 0.65;
+      if (night && !weather.raining){
+        const onSurface = by <= surfaceY + 1;
+        const surfaceCount = beetles.filter(b => !b.dead && Math.round(b.y) <= surfaceY + 1).length;
+        if (!onSurface && surfaceCount < CAP.beetlesSurfaceMax) this.wantSurface = true;
+        if (onSurface && this.cool === 0){
+          layBeetleEgg(bx, surfaceY);
+          this.cool = 6.0 + Math.random()*6.0;
+        }
+      } else {
+        this.wantSurface = false;
+      }
+
+      beetleMoveAndDig(this, dt, L);
+
+      if (this.hp <= 0){
+        this.dead=true;
+        resources.corpses.push({x:bx,y:by,e:1.8,kind:"beetle"});
+      }
+    }
+  }
+
+  class Mealworm {
+    constructor(x,y){
+      this.x=x; this.y=y;
+      this.hp=40;
+      this.dead=false;
+      this.hunger=1.0;
+      this.milk=0.0;
+      this.captured=false;
+      this.cool=0;
+    }
+    tick(t,dt){
+      if (this.dead) return;
+      this.cool -= dt;
+      if (this.cool < 0) this.cool = 0;
+
+      const mx = Math.round(this.x), my = Math.round(this.y);
+      const night = weather.nightFactor > 0.65;
+      const nearMush = nearestMushroom(mx,my,1.5);
+      const underLeaf = isUnderLeaf(mx, my);
+      const microclimate = (night && underLeaf && nearMush);
+
+      const hungerDrain = night ? (microclimate ? 0.008 : 0.030) : 0.012;
+      this.hunger = clamp(this.hunger - hungerDrain * dt, 0, 1);
+
+      if (this.hunger <= 0){
+        this.hp -= dt * 2.2;
+      }
+
+      const L = light[idx(clamp(mx,0,W-1), clamp(my,0,H-1))] || 0;
+
+      if (!this.captured && my <= surfaceY + 1 && this.cool === 0){
+        const leaf = nearestLeaf(mx,my,1.2);
+        if (leaf && leaf.durability > 0){
+          leaf.durability -= 0.12;
+          this.hunger = clamp(this.hunger + 0.32, 0, 1);
+          spawnPellet(mx, my);
+          this.cool = 0.8 + Math.random()*0.8;
+        } else {
+          mealwormWander(this, dt);
+        }
+      }
+
+      if (L > 0.22 && this.hunger > 0.35){
+        this.milk += dt * 0.035;
+        if (Math.random() < dt * 0.12) spawnPellet(mx,my);
+      }
+
+      if (this.hp <= 0){
+        this.dead=true;
+        resources.corpses.push({x:mx,y:my,e:2.2,kind:"mealworm"});
+      }
+    }
+  }
+
+  class Spider {
+    constructor(x){
+      this.x = x;
+      this.y = surfaceY;
+      this.hp = 120;
+      this.dead = false;
+      this.nest = {x, y:surfaceY};
+      this.leafPile = 0;
+      this.hasMealworm = false;
+      this.mealworm = null;
+      this.eggLaid = false;
+      this.cool=0;
+    }
+    tick(t,dt){
+      if (this.dead) return;
+      this.cool -= dt;
+      if (this.cool < 0) this.cool = 0;
+
+      if (!this.eggLaid){
+        const leaf = nearestLeaf(this.x, this.y, 10);
+        if (leaf && this.cool === 0){
+          leaf.x = lerp(leaf.x, this.nest.x, 0.25);
+          leaf.y = surfaceY;
+          if (Math.abs(leaf.x - this.nest.x) < 1){
+            this.leafPile += 1;
+            leaf.durability = Math.max(0, leaf.durability - 0.6);
+            if (leaf.durability <= 0) leaf._dead = true;
+          }
+          this.cool = 0.35;
+        }
+      }
+
+      if (!this.hasMealworm && this.cool === 0){
+        const mw = nearestMealworm(this.x, this.y, 6.0, {onlyFree:true});
+        if (mw){
+          this.hasMealworm = true;
+          this.mealworm = mw;
+          mw.captured = true;
+          mw.x = this.nest.x;
+          mw.y = surfaceY;
+          this.cool = 1.0;
+        }
+      }
+
+      if (this.cool === 0){
+        const ant = nearestAnt(this.x,this.y,3.2);
+        if (ant){
+          ant.hp -= dt * 20;
+          this.cool = 0.55;
+        }
+        const bt = nearestBeetle(this.x,this.y,3.2);
+        if (bt){
+          bt.hp -= dt * 10;
+          this.cool = 0.55;
+        }
+      }
+
+      if (this.hasMealworm && this.mealworm && !this.mealworm.dead){
+        depositSpiderHaze(this.nest.x, surfaceY, 1.0, 10);
+      }
+
+      if (!this.eggLaid && this.leafPile >= 12 && this.hasMealworm){
+        const night = weather.nightFactor > 0.65;
+        const mush = nearestMushroom(this.nest.x, surfaceY, 3.0);
+        if (night && mush){
+          this.eggLaid = true;
+          this.hp = 0;
+          this.dead = true;
+          spiderEgg = {x:this.nest.x, y:surfaceY, hatchAt: tNow + 18.0};
+        }
+      }
+    }
+  }
+
+  let rng = new RNG(497877369);
+  let tNow = 0;
+  let paused = false;
+
+  let orange, cyan;
+  let brood = [];
+  let worms = [];
+  let beetles = [];
+  let mealworms = [];
+  let spider = null;
+  let spiderEgg = null;
+
+  let mound = new Float32Array(W);
+
+  rngSolar.addEventListener("input", () => TUNE.solar = parseFloat(rngSolar.value));
+  rngHL.addEventListener("input", () => TUNE.phHalfLife = parseFloat(rngHL.value));
+  rngWormDepth.addEventListener("input", () => TUNE.wormSmellDepth = parseInt(rngWormDepth.value, 10));
+
+  /* -----------------------------
+     World helpers
+     ----------------------------- */
+  function isWalkable(x,y){
+    if (x<0||x>=W||y<0||y>=H) return false;
+    return tile[idx(x,y)] === TILE_TUNNEL;
+  }
+
+  function carveRoomRect(x0,y0,x1,y1){
+    for (let y=y0;y<=y1;y++){
+      for (let x=x0;x<=x1;x++){
+        if (x<1||x>W-2||y<surfaceY||y>H-2) continue;
+        const i = idx(x,y);
+        tile[i] = TILE_TUNNEL;
+        tunnelTag[i] = 1;
+      }
+    }
+  }
+
+  function scatterRocks(){
+    const placeCluster = (count, type, yMin, yMax) => {
+      for (let k=0;k<count;k++){
+        const cx = rng.i(8, W-9);
+        const cy = rng.i(yMin, yMax);
+        const r = (type===TILE_ROCK_L) ? rng.i(3,5) : (type===TILE_ROCK_M ? rng.i(2,3) : rng.i(1,2));
+        for (let dy=-r; dy<=r; dy++){
+          for (let dx=-r; dx<=r; dx++){
+            if (dx*dx + dy*dy > r*r) continue;
+            const x = cx + dx, y = cy + dy;
+            if (x<1||x>W-2||y<surfaceY+6||y>H-2) continue;
+            const i = idx(x,y);
+            if (tile[i] === TILE_SOIL && rng.f() < 0.85) tile[i] = type;
+          }
+        }
+      }
+    };
+    placeCluster(22, TILE_ROCK_S, surfaceY+10, H-18);
+    placeCluster(16, TILE_ROCK_M, surfaceY+18, H-14);
+    placeCluster(10, TILE_ROCK_L, surfaceY+28, H-8);
+  }
+
+  function carveEntrance(col){
+    const ex = col.entrance.x;
+    const setTunnel = (x,y) => { const i=idx(x,y); tile[i]=TILE_TUNNEL; tunnelTag[i]=1; };
+
+    setTunnel(ex, surfaceY);
+    setTunnel(ex, surfaceY+1);
+    setTunnel(ex, surfaceY+2);
+
+    const cx = ex, cy = surfaceY + 8;
+    col.nest.x = cx; col.nest.y = cy;
+
+    carveRoomRect(cx-2, cy-1, cx+2, cy+1);
+
+    // plug starts as soil, ants must unseal it
+    tile[idx(ex, surfaceY+3)] = TILE_SOIL;
+    tunnelTag[idx(ex, surfaceY+3)] = 0;
+
+    setTunnel(ex, surfaceY+4);
+  }
+
+  function spawnQueenAndStarter(col){
+    const q = new Ant(col, CASTE.QUEEN, col.nest.x, col.nest.y);
+    q.e = STAT[CASTE.QUEEN].eMax * 0.6;
+    col.queen = q;
+    col.ants.push(q);
+
+    const w = new Ant(col, CASTE.DIGGER, col.nest.x+1, col.nest.y);
+    w.e = STAT[w.caste].eMax * 0.8;
+    w.isRunner = true;
+    col.ants.push(w);
+  }
+
+  function initSky(){
+    clouds = [];
+    for (let i=0;i<10;i++){
+      clouds.push({
+        x: rng.f(),
+        y: rng.f()*0.55,
+        s: 0.8 + rng.f()*1.6,
+        v: 0.02 + rng.f()*0.05
+      });
+    }
+    stars = [];
+    for (let i=0;i<260;i++){
+      stars.push({x:rng.f(), y:rng.f()*0.75, a:0.2+rng.f()*0.8});
+    }
+    weather.tod = rng.f();
+    weather.raining = false;
+    weather.rainT = 0;
+    weather.lastRainEnd = -999;
+  }
+
+  /* -----------------------------
+     Reset
+     ----------------------------- */
+  function reset(seed){
+    tNow = 0;
+    paused = false;
+    rng = new RNG(seed ?? (Date.now() & 0x7fffffff));
+
+    tile = new Uint8Array(W*H);
+    tunnelTag = new Uint8Array(W*H);
+    moisture = new Float32Array(W*H);
+    light = new Float32Array(W*H);
+    filth = new Float32Array(W*H);
+    allocPheromones();
+
+    resources.leaves.length = 0;
+    resources.pellets.length = 0;
+    resources.mushrooms.length = 0;
+    resources.foodPacks.length = 0;
+    resources.corpses.length = 0;
+    rooms = [];
+    brood = [];
+
+    worms = [];
+    beetles = [];
+    mealworms = [];
+    spider = null;
+    spiderEgg = null;
+
+    mound.fill(0);
+
+    for (let y=0;y<H;y++){
+      for (let x=0;x<W;x++){
+        tile[idx(x,y)] = (y < surfaceY) ? TILE_AIR : TILE_SOIL;
+        moisture[idx(x,y)] = (y > surfaceY ? 0.35 : 0.05);
+      }
+    }
+
+    scatterRocks();
+
+    orange = new Colony("ORANGE", "#ff9b3c", Math.floor(W*0.35));
+    cyan   = new Colony("CYAN",   "#57d6ff", Math.floor(W*0.65));
+
+    carveEntrance(orange);
+    carveEntrance(cyan);
+
+    spawnQueenAndStarter(orange);
+    spawnQueenAndStarter(cyan);
+
+    initSky();
+
+    spider = new Spider(Math.floor(W*0.50));
+
+    cam.tx = orange.homeX - 60;
+    cam.ty = surfaceY - 10;
+    cam.zoom = parseFloat(rngZoom.value);
+
+    hideOverlay();
+    updateStatus();
+    updateCodesUI();
+  }
+
+  /* -----------------------------
+     Pheromones
+     ----------------------------- */
+  function decayPheromones(dt){
+    const hl = Math.max(1, TUNE.phHalfLife);
+    const decay = Math.exp(-Math.log(2) * dt / hl);
+    for (let i=0;i<W*H;i++){
+      phO_home[i]*=decay; phO_food[i]*=decay; phO_dang[i]*=decay;
+      phC_home[i]*=decay; phC_food[i]*=decay; phC_dang[i]*=decay;
+      phSpider[i]*=Math.exp(-Math.log(2)*dt/10.0);
+      filth[i] *= Math.exp(-dt/120);
+    }
+  }
+
+  function depositPheromones(a){
+    const x = Math.round(a.x), y = Math.round(a.y);
+    if (x<0||x>=W||y<0||y>=H) return;
+    const i = idx(x,y);
+    const isFoodLike = !!a.drag;
+    const isFighter = (a.caste === CASTE.WARRIOR || a.caste === CASTE.HUNTER);
+    const dangBoost = isFighter ? 0.22 : 0.08;
+
+    // pheromones on tunnels and surface only
+    if (!(isSurface(y) || isWalkable(x,y))) return;
+
+    if (a.colony.name === "ORANGE"){
+      phO_home[i] = Math.min(1, phO_home[i] + 0.06);
+      if (isFoodLike) phO_food[i] = Math.min(1, phO_food[i] + 0.10);
+      if (isFighter && a.task === "HUNT") phO_dang[i] = Math.min(1, phO_dang[i] + dangBoost);
+    } else {
+      phC_home[i] = Math.min(1, phC_home[i] + 0.06);
+      if (isFoodLike) phC_food[i] = Math.min(1, phC_food[i] + 0.10);
+      if (isFighter && a.task === "HUNT") phC_dang[i] = Math.min(1, phC_dang[i] + dangBoost);
+    }
+  }
+
+  function depositSpiderHaze(cx, cy, amount, r){
+    const y0 = Math.max(0, surfaceY-2);
+    const y1 = Math.min(H-1, surfaceY+2);
+    for (let y=y0;y<=y1;y++){
+      for (let x=Math.max(0,cx-r); x<=Math.min(W-1,cx+r); x++){
+        const dx=x-cx, dy=y-cy;
+        if (dx*dx+dy*dy>r*r) continue;
+        const i=idx(x,y);
+        phSpider[i] = Math.min(1, phSpider[i] + amount * 0.04);
+      }
+    }
+  }
+
+  /* -----------------------------
+     Dist / nearest
+     ----------------------------- */
+  function dist(ax,ay,bx,by){
+    const dx=ax-bx, dy=ay-by;
+    return Math.sqrt(dx*dx+dy*dy);
+  }
+
+  function nearestAnt(x,y,r){
+    let best=null, bd=r;
+    for (const col of [orange, cyan]){
+      for (const a of col.ants){
+        if (a.dead || a.caste===CASTE.QUEEN) continue;
+        const d = dist(a.x,a.y,x,y);
+        if (d < bd){ bd=d; best=a; }
+      }
+    }
+    return best;
+  }
+
+  function nearestBeetle(x,y,r){
+    let best=null, bd=r;
+    for (const b of beetles){
+      if (b.dead) continue;
+      const d = dist(b.x,b.y,x,y);
+      if (d < bd){ bd=d; best=b; }
+    }
+    return best;
+  }
+
+  function nearestMealworm(x,y,r,{onlyFree=true}={}){
+    let best=null, bd=r;
+    for (const m of mealworms){
+      if (!m || m.dead) continue;
+      if (onlyFree && m.captured) continue;
+      const d = dist(m.x,m.y,x,y);
+      if (d < bd){ bd=d; best=m; }
+    }
+    return best;
+  }
+
+  function nearestLeaf(x,y,r){
+    let best=null, bd=r;
+    for (const l of resources.leaves){
+      if (l._dead) continue;
+      if (l.egg) continue;
+      const d = dist(l.x,l.y,x,y);
+      if (d < bd){ bd=d; best=l; }
+    }
+    return best;
+  }
+
+  function isUnderLeaf(x,y){
+    for (const l of resources.leaves){
+      if (l._dead) continue;
+      if (l.egg) continue;
+      if (Math.abs(l.x - x) <= 1 && Math.abs(l.y - y) <= 0.5 && l.durability > 0.35) return true;
+    }
+    return false;
+  }
+
+  function nearestMushroom(x,y,r){
+    let best=null, bd=r;
+    for (const m of resources.mushrooms){
+      const d = dist(m.x,m.y,x,y);
+      if (d < bd){ bd=d; best=m; }
+    }
+    return best;
+  }
+
+  function nearestFoodPack(x,y,r){
+    let best=null, bd=r;
+    for (const p of resources.foodPacks){
+      const d=dist(p.x,p.y,x,y);
+      if (d<bd){bd=d;best=p;}
+    }
+    return best;
+  }
+
+  function nearestPellet(x,y,r){
+    let best=null, bd=r;
+    for (const p of resources.pellets){
+      const d=dist(p.x,p.y,x,y);
+      if (d<bd){bd=d;best=p;}
+    }
+    return best;
+  }
+
+  function nearestCorpse(x,y,r){
+    let best=null, bd=r;
+    for (const c of resources.corpses){
+      const d=dist(c.x,c.y,x,y);
+      if (d<bd){bd=d;best=c;}
+    }
+    return best;
+  }
+
+  /* -----------------------------
+     Spawns
+     ----------------------------- */
+  function dropFoodPack(){
+    const x = rng.i(30, W-30);
+    const y = surfaceY;
+    resources.foodPacks.push({x,y,e: 14 + rng.f()*10});
+  }
+
+  function spawnLeaf(){
+    if (resources.leaves.length >= CAP.leaves) return;
+    const tx = rng.pick([Math.floor(W*0.2), Math.floor(W*0.5), Math.floor(W*0.8)]);
+    const x = clamp(tx + rng.i(-10,10), 2, W-3);
+    resources.leaves.push({
+      x, y: surfaceY,
+      w: 3 + rng.i(0,3),
+      pieces: 1,
+      durability: 1.0,
+      _dead:false
+    });
+  }
+
+  function spawnSurfaceMushroomUnderLeaf(x){
+    if (resources.mushrooms.length >= CAP.mushrooms) return;
+    resources.mushrooms.push({x, y: surfaceY, e: 0.0, glow: 0.0, surface:true});
+  }
+
+  function spawnPellet(x,y){
+    if (resources.pellets.length >= CAP.pellets) return;
+    resources.pellets.push({x, y, e:0.0, life: 60 + rng.f()*60});
+  }
+
+  function layBeetleEgg(x, y){
+    if (resources.leaves.length >= CAP.leaves) return;
+    resources.leaves.push({x, y:surfaceY, w:1, pieces:1, durability:0.35, egg:true, _dead:false});
+  }
+
+  /* -----------------------------
+     Ant tasks
+     ----------------------------- */
+  function findOrCreateCompostRoom(col){
+    let r = rooms.find(rr => rr.owner === col.name && rr.type === "COMPOST");
+    if (r) return r;
+    const x0 = col.nest.x - 7, y0 = col.nest.y + 2;
+    const x1 = col.nest.x - 3, y1 = col.nest.y + 5;
+    carveRoomRect(x0,y0,x1,y1);
+    r = {id: rooms.length, owner: col.name, x0,y0,x1,y1, type:"COMPOST", compostE:0, mushE:0, light:0, moisture:0.35};
+    rooms.push(r);
+    return r;
+  }
+
+  function findOrCreateMushRoom(col){
+    let r = rooms.find(rr => rr.owner === col.name && rr.type === "MUSHROOM");
+    if (r) return r;
+    const x0 = col.nest.x + 3, y0 = col.nest.y + 8;
+    const x1 = col.nest.x + 10, y1 = col.nest.y + 13;
+    carveRoomRect(x0,y0,x1,y1);
+    r = {id: rooms.length, owner: col.name, x0,y0,x1,y1, type:"MUSHROOM", compostE:0, mushE:0, light:0, moisture:0.35};
+    rooms.push(r);
+    return r;
+  }
+
+  function pickDigFrontier(col){
+    const ex = col.entrance.x;
+    let best = {x: ex, y: surfaceY+5};
+    let bestScore = -1e9;
+
+    for (let k=0;k<40;k++){
+      const x = clamp(ex + rng.i(-30,30), 2, W-3);
+      const y = clamp(surfaceY + rng.i(5, 55), surfaceY+3, H-3);
+
+      const i = idx(x,y);
+      if (tile[i] !== TILE_SOIL) continue;
+
+      let touches = false;
+      for (const d of DIRS){
+        const nx=x+d.x, ny=y+d.y;
+        if (isWalkable(nx,ny)){ touches = true; break; }
+      }
+      if (!touches) continue;
+
+      const depth = y - surfaceY;
+      const score = depth * 1.2 - Math.abs(x - ex) * 0.08;
+      if (score > bestScore){
+        bestScore = score;
+        best = {x,y};
+      }
+    }
+    return best;
+  }
+
+  function nearestAdjacentTunnel(tx,ty, fallbackX, fallbackY){
+    let best = {x:fallbackX, y:fallbackY};
+    let bd = 1e9;
+    for (const d of DIRS){
+      const nx=tx+d.x, ny=ty+d.y;
+      if (nx<1||nx>W-2||ny<surfaceY||ny>H-2) continue;
+      if (tile[idx(nx,ny)] === TILE_TUNNEL){
+        const dd = Math.abs(nx - fallbackX) + Math.abs(ny - fallbackY);
+        if (dd < bd){ bd=dd; best={x:nx,y:ny}; }
+      }
+    }
+    return best;
+  }
+
+  function assignTask(a){
+    const col = a.colony;
+
+    const plugX = col.entrance.x;
+    const plugY = surfaceY + 3;
+    if (tile[idx(plugX, plugY)] === TILE_SOIL){
+      if (a.caste === CASTE.DIGGER || a.caste === CASTE.DRONE){
+        a.task = "DIG";
+        a.target = {x: plugX, y: plugY};
+        return;
+      }
+    }
+
+    findOrCreateCompostRoom(col);
+    findOrCreateMushRoom(col);
+
+    if ((a.isRunner || col.wantRunner) && (a.caste === CASTE.DRONE || a.caste === CASTE.SCOUT || a.caste === CASTE.DIGGER)){
+      const leaf = nearestLeaf(col.entrance.x, surfaceY, 80);
+      if (leaf){
+        a.task = "GET_LEAF";
+        a.target = leaf;
+        return;
+      }
+      const pack = nearestFoodPack(col.entrance.x, surfaceY, 90);
+      if (pack){
+        a.task = "GET_PACK";
+        a.target = pack;
+        return;
+      }
+      a.task = "SURFACE_SCOUT";
+      a.target = {x: clamp(col.entrance.x + (rng.f()<0.5?-1:1) * rng.i(10,30), 4, W-5), y: surfaceY};
+      return;
+    }
+
+    if (a.caste === CASTE.DIGGER){
+      a.task = "DIG_FRONTIER";
+      a.target = pickDigFrontier(col);
+      return;
+    }
+
+    if (a.caste === CASTE.SCOUT){
+      a.task = "SURFACE_SCOUT";
+      a.target = {x: clamp(col.entrance.x + (rng.f()<0.5?-1:1) * rng.i(14,40), 4, W-5), y: surfaceY};
+      return;
+    }
+
+    if (a.caste === CASTE.WARRIOR || a.caste === CASTE.HUNTER){
+      const stored = col.storeFoodE + col.storeFungusE + col.storeMilkE;
+      if (stored > 18){
+        const b = nearestBeetle(col.entrance.x, surfaceY+2, 26);
+        if (b){
+          a.task = "HUNT";
+          a.target = b;
+          return;
+        }
+      }
+      a.task = "GUARD";
+      a.target = {x: col.entrance.x, y: surfaceY+2};
+      return;
+    }
+
+    const pellet = nearestPellet(col.nest.x, col.nest.y, 18);
+    if (pellet){
+      a.task = "GET_PELLET";
+      a.target = pellet;
+      return;
+    }
+
+    const corpse = nearestCorpse(col.nest.x, col.nest.y, 18);
+    if (corpse){
+      a.task = "GET_CORPSE";
+      a.target = corpse;
+      return;
+    }
+
+    a.task = "DIG_FRONTIER";
+    a.target = pickDigFrontier(col);
+  }
+
+  function stepTask(a, dt){
+    const col = a.colony;
+
+    if (a.task === "SURFACE_SCOUT"){
+      if (Math.abs(a.y - surfaceY) > 0.6){
+        a.target = {x: col.entrance.x, y: surfaceY};
+      } else {
+        const leaf = nearestLeaf(a.x, surfaceY, 6);
+        if (leaf){
+          a.task = "GET_LEAF";
+          a.target = leaf;
+          return;
+        }
+        const pack = nearestFoodPack(a.x, surfaceY, 6);
+        if (pack){
+          a.task = "GET_PACK";
+          a.target = pack;
+          return;
+        }
+      }
+    }
+
+    if (a.task === "GET_PACK"){
+      const p = a.target;
+      if (!p){ a.task="IDLE"; return; }
+      if (Math.abs(a.y - surfaceY) > 0.6) a.target = {x: col.entrance.x, y: surfaceY};
+      if (dist(a.x,a.y,p.x,p.y) < 0.8){
+        const w = 1.5;
+        if (a.carryCap() >= w){
+          a.drag = {kind:"food", e: Math.min(p.e, 4.0), w: w};
+          p.e -= a.drag.e;
+          if (p.e <= 0.2) safeRemove(resources.foodPacks, p);
+          a.task = "RETURN_NEST";
+          a.target = {x: col.nest.x, y: col.nest.y};
+        }
+      } else {
+        a.target = {x: p.x, y: p.y};
+      }
+    }
+
+    if (a.task === "GET_LEAF"){
+      const l = a.target;
+      if (!l || l._dead){ a.task="IDLE"; return; }
+      if (dist(a.x,a.y,l.x,l.y) < 0.9){
+        const w = l.w;
+        if (w > a.carryCap()){
+          if (a.e > 0.8){
+            a.e -= 0.5;
+            l.w -= 1;
+            if (l.w <= 2) l.pieces += 1;
+          }
+          a.cool = 0.2;
+          return;
+        }
+        a.drag = {kind:"leaf", e: 0.0, w: Math.min(w, a.carryCap()), ref:l};
+        l.durability -= 0.18;
+        l.w = Math.max(1, l.w - 1);
+        if (l.durability <= 0) l._dead = true;
+        a.task = "RETURN_COMPOST";
+        const r = rooms.find(rr => rr.owner===col.name && rr.type==="COMPOST");
+        a.target = {x: Math.floor((r.x0+r.x1)/2), y: Math.floor((r.y0+r.y1)/2)};
+      } else {
+        a.target = {x:l.x, y:l.y};
+      }
+    }
+
+    if (a.task === "GET_PELLET"){
+      const p = a.target;
+      if (!p){ a.task="IDLE"; return; }
+      if (dist(a.x,a.y,p.x,p.y) < 0.8){
+        a.drag = {kind:"pellet", w: 1, ref:p};
+        safeRemove(resources.pellets, p);
+        a.task = "RETURN_COMPOST";
+        const r = rooms.find(rr => rr.owner===col.name && rr.type==="COMPOST");
+        a.target = {x: Math.floor((r.x0+r.x1)/2), y: Math.floor((r.y0+r.y1)/2)};
+      } else {
+        a.target = {x:p.x, y:p.y};
+      }
+    }
+
+    if (a.task === "GET_CORPSE"){
+      const c = a.target;
+      if (!c){ a.task="IDLE"; return; }
+      if (dist(a.x,a.y,c.x,c.y) < 0.8){
+        const w = 2.0;
+        if (a.carryCap() >= w){
+          a.drag = {kind:"corpse", w, ref:c, e: c.e};
+          safeRemove(resources.corpses, c);
+          a.task = "RETURN_COMPOST";
+          const r = rooms.find(rr => rr.owner===col.name && rr.type==="COMPOST");
+          a.target = {x: Math.floor((r.x0+r.x1)/2), y: Math.floor((r.y0+r.y1)/2)};
+        }
+      } else {
+        a.target = {x:c.x, y:c.y};
+      }
+    }
+
+    if (a.task === "RETURN_COMPOST"){
+      const r = rooms.find(rr => rr.owner===col.name && rr.type==="COMPOST");
+      if (!r){ a.task="IDLE"; return; }
+      const cx = Math.floor((r.x0+r.x1)/2), cy=Math.floor((r.y0+r.y1)/2);
+      if (dist(a.x,a.y,cx,cy) < 0.8){
+        if (a.drag){
+          if (a.drag.kind === "leaf"){
+            col.storeSubstrate += 1.0;
+            r.compostE += 1.0;
+          }
+          if (a.drag.kind === "pellet"){
+            r.compostE += 0.6;
+            filth[idx(cx,cy)] = Math.max(0, filth[idx(cx,cy)] - 0.12);
+          }
+          if (a.drag.kind === "corpse"){
+            r.compostE += a.drag.e * 1.1;
+          }
+        }
+        a.drag = null;
+        a.task = "IDLE";
+      } else {
+        a.target = {x:cx, y:cy};
+      }
+    }
+
+    if (a.task === "RETURN_NEST"){
+      const nx = col.nest.x, ny = col.nest.y;
+      if (dist(a.x,a.y,nx,ny) < 0.8){
+        if (a.drag && a.drag.kind === "food"){
+          col.storeFoodE += a.drag.e;
+        }
+        a.drag = null;
+        a.task = "IDLE";
+      } else {
+        a.target = {x:nx, y:ny};
+      }
+    }
+
+    if (a.task === "DIG" || a.task === "DIG_FRONTIER"){
+      const tg = a.target || pickDigFrontier(col);
+      const tx = tg.x, ty = tg.y;
+      if (dist(a.x,a.y,tx,ty) < 1.2){
+        if (tile[idx(tx,ty)] === TILE_SOIL){
+          const cost = digCost(a.caste) * 0.85;
+          if (a.e > cost){
+            a.e -= cost;
+            digTileBy(tx,ty, 1);
+            mound[tx] = (mound[tx]||0) + 0.08;
+            col.deepestDig = Math.max(col.deepestDig, ty - surfaceY);
+            a.cool = 0.05;
+          }
+        } else {
+          a.target = pickDigFrontier(col);
+        }
+      } else {
+        a.target = nearestAdjacentTunnel(tx,ty, col.entrance.x, col.entrance.y);
+      }
+    }
+
+    if (a.task === "GUARD"){
+      const tg = a.target;
+      if (tg && dist(a.x,a.y,tg.x,tg.y) > 0.8){
+        a.target = tg;
+      }
+      if (a.caste === CASTE.WARRIOR || a.caste === CASTE.HUNTER){
+        const bx = Math.round(a.x), by = Math.round(a.y);
+        const b = nearestBeetle(bx, by, 2.2);
+        if (b) { b.hp -= dt * (a.caste===CASTE.HUNTER ? 26 : 14); }
+      }
+    }
+
+    if (a.task === "HUNT"){
+      const b = a.target;
+      if (!b || b.dead){ a.task="IDLE"; return; }
+      const d = dist(a.x,a.y,b.x,b.y);
+      if (d < 1.4){
+        b.hp -= dt * (a.caste===CASTE.HUNTER ? 32 : 18);
+      } else {
+        a.target = {x: Math.round(b.x), y: Math.round(b.y)};
+      }
+    }
+  }
+
+  function moveAnt(a, dt){
+    if (a.dead) return;
+
+    let tx = a.x, ty = a.y;
+    if (a.target){ tx = a.target.x; ty = a.target.y; }
+
+    const ax = a.x, ay = a.y;
+    let dx = tx - ax, dy = ty - ay;
+    const d = Math.sqrt(dx*dx + dy*dy);
+
+    const speed = a.speedBase() * (a.caste === CASTE.SCOUT ? 2.1 : 1.65);
+
+    if (d > 0.001){
+      const step = Math.min(d, dt * speed);
+      const nx = ax + dx / d * step;
+      const ny = ay + dy / d * step;
+
+      const gx = Math.round(nx), gy = Math.round(ny);
+
+      const ok = isSurface(gy) || isWalkable(gx,gy);
+      if (ok){
+        a.x = nx; a.y = ny;
+        a.e = Math.max(0, a.e - STAT[a.caste].moveE * dt * (a.drag?1.25:1.0));
+      } else {
+        a.target = {x: a.colony.entrance.x, y: surfaceY+2};
+      }
+      a.dir = (dx >= 0) ? 1 : -1;
+    }
+  }
+
+  /* -----------------------------
+     Beetle / worm movement + backfill (strict)
+     ----------------------------- */
+  function antOccupies(x,y){
+    for (const col of [orange, cyan]){
+      for (const a of col.ants){
+        if (a.dead) continue;
+        if (Math.round(a.x)===x && Math.round(a.y)===y) return true;
+      }
+    }
+    return false;
+  }
+
+  function beetleTryStep(b, bx, by, nx, ny){
+    if (!canBeetleEnter(nx, ny)) return false;
+
+    const iN = idx(nx,ny);
+    const tN = tile[iN];
+
+    const backX = bx, backY = by;
+    const backIdx = idx(backX, backY);
+    const antOnBack = antOccupies(backX, backY);
+
+    // Backfill only beetle-made tunnels, never in rooms, never on surface, never if an ant is there.
+    const canBackfill = !antOnBack
+      && (backY > surfaceY+1)
+      && !isRoomTile(backX, backY)
+      && (tile[backIdx] === TILE_TUNNEL)
+      && (tunnelTag[backIdx] === 2);
+
+    if (isSurface(ny)){
+      b.x = nx; b.y = ny;
+    } else if (tN === TILE_SOIL){
+      digTileBy(nx, ny, 2);
+      b.x = nx; b.y = ny;
+      if (canBackfill){
+        tile[backIdx] = TILE_SOIL;
+        tunnelTag[backIdx] = 0;
+      }
+    } else if (tN === TILE_TUNNEL){
+      b.x = nx; b.y = ny;
+      // do not backfill if current tile is not beetle made
+      if (canBackfill){
+        tile[backIdx] = TILE_SOIL;
+        tunnelTag[backIdx] = 0;
+      }
+    } else {
+      return false;
+    }
+
+    return true;
+  }
+
+  function beetleMoveAndDig(b, dt, L){
+    const bx = Math.round(b.x), by = Math.round(b.y);
+
+    let tx = bx, ty = by;
+    if (b.wantSurface){
+      tx = bx;
+      ty = surfaceY;
+    } else {
+      const mw = nearestMealworm(bx, by, 16, {onlyFree:true});
+      const w = worms.find(w => !w.dead && dist(w.head.x,w.head.y,bx,by) < 18);
+      if (mw){ tx = Math.round(mw.x); ty = Math.round(mw.y); }
+      else if (w){ tx = Math.round(w.head.x); ty = Math.round(w.head.y); }
+      else {
+        tx = clamp(bx + rng.i(-4,4), 2, W-3);
+        ty = clamp(by + (L>0.2 ? rng.i(1,3) : rng.i(-2,2)), surfaceY+2, H-3);
+      }
+    }
+
+    const sx = clamp(tx - bx, -1, 1);
+    const sy = clamp(ty - by, -1, 1);
+
+    // primary step
+    let nx = bx + sx;
+    let ny = by + sy;
+
+    // Better tile validation: try alternate axis if blocked.
+    if (!beetleTryStep(b, bx, by, nx, ny)){
+      if (sx !== 0 && beetleTryStep(b, bx, by, bx + sx, by)) {
+        // ok
+      } else if (sy !== 0 && beetleTryStep(b, bx, by, bx, by + sy)) {
+        // ok
+      } else {
+        // stuck, do nothing
+      }
+    }
+
+    // attacks
+    const mw2 = mealworms.find(m => !m.dead && dist(m.x,m.y,b.x,b.y) < 1.2);
+    if (mw2) mw2.hp -= dt * 7.0;
+    const ant = nearestAnt(bx,by,1.3);
+    if (ant) ant.hp -= dt * 6.5;
+    const w2 = worms.find(w => !w.dead && dist(w.head.x,w.head.y,bx,by) < 1.4);
+    if (w2) w2.hp -= dt * 8.0;
+  }
+
+  function wormTryStep(w, hx, hy, nx, ny){
+    if (!canWormEnter(nx, ny)) return false;
+
+    const iN = idx(nx,ny);
+    const tN = tile[iN];
+
+    if (!isSurface(ny)){
+      if (tN === TILE_SOIL || tN === TILE_ROCK_S){
+        digTileBy(nx, ny, 3);
+      }
+    }
+
+    const oldHead = {x: w.head.x, y: w.head.y};
+    w.head.x = nx; w.head.y = ny;
+
+    for (let i=w.segs.length-1; i>0; i--){
+      w.segs[i].x = w.segs[i-1].x;
+      w.segs[i].y = w.segs[i-1].y;
+    }
+    w.segs[0].x = oldHead.x;
+    w.segs[0].y = oldHead.y;
+
+    // Worm backfill only worm-made tunnels, never rooms, never if ants occupy.
+    const backX = hx, backY = hy;
+    const backIdx = idx(backX, backY);
+    const antOnBack = antOccupies(backX, backY);
+
+    if (!antOnBack
+      && backY > surfaceY+4
+      && !isRoomTile(backX, backY)
+      && tile[backIdx] === TILE_TUNNEL
+      && tunnelTag[backIdx] === 3)
+    {
+      tile[backIdx] = TILE_SOIL;
+      tunnelTag[backIdx] = 0;
+      if (Math.random() < 0.08){
+        resources.corpses.push({x: backX, y: backY, e: 0.6, kind:"protein"});
+      }
+    }
+
+    return true;
+  }
+
+  function wormMoveAndDig(w, dt){
+    const hx = Math.round(w.head.x), hy = Math.round(w.head.y);
+
+    orange.recomputeCounts();
+    cyan.recomputeCounts();
+
+    const anyWarriors = orange.hasWarrior || cyan.hasWarrior;
+    const seriousDig = (orange.deepestDig >= TUNE.wormSmellDepth) || (cyan.deepestDig >= TUNE.wormSmellDepth);
+    const rainWash = (tNow - weather.lastRainEnd < 45) && !weather.raining;
+
+    w.wantUp = (seriousDig || rainWash);
+
+    if (w.wantUp && anyWarriors && hy > surfaceY+2 && Math.random() < dt * 0.08){
+      w.upTask = true;
+    }
+    if (!w.wantUp) w.upTask = false;
+
+    let tx = hx, ty = hy;
+    if (w.wantUp){
+      ty = surfaceY + 1;
+      tx = clamp(hx + rng.i(-2,2), 2, W-3);
+    } else {
+      ty = clamp(hy + rng.i(-2,3), surfaceY+10, H-3);
+      tx = clamp(hx + rng.i(-3,3), 2, W-3);
+    }
+    if (weather.raining){
+      ty = clamp(hy + rng.i(2,5), surfaceY+12, H-3);
+    }
+
+    const sx = clamp(tx - hx, -1, 1);
+    const sy = clamp(ty - hy, -1, 1);
+
+    let nx = hx + sx;
+    let ny = hy + sy;
+
+    // better validation: try alternate axis if blocked
+    if (!wormTryStep(w, hx, hy, nx, ny)){
+      if (sx !== 0 && wormTryStep(w, hx, hy, hx + sx, hy)) {
+        // ok
+      } else if (sy !== 0 && wormTryStep(w, hx, hy, hx, hy + sy)) {
+        // ok
+      } else {
+        // stuck
+      }
+    }
+
+    // low base pressure unless upTask
+    if (!w.upTask){
+      const ant = nearestAnt(w.head.x, w.head.y, 1.2);
+      if (ant) ant.hp -= dt * 1.2;
+    }
+  }
+
+  /* -----------------------------
+     Rocks falling
+     ----------------------------- */
+  function rockFallsStep(){
+    for (let y=H-2; y>=surfaceY+2; y--){
+      for (let x=1; x<W-1; x++){
+        const i = idx(x,y);
+        const t = tile[i];
+        if (t !== TILE_ROCK_S && t !== TILE_ROCK_M && t !== TILE_ROCK_L) continue;
+        const below = idx(x,y+1);
+        if (tile[below] === TILE_TUNNEL){
+          tile[below] = t;
+          tile[i] = TILE_TUNNEL;
+          tunnelTag[i] = 0;
+
+          for (const w of worms){
+            if (w.dead) continue;
+            const hx = Math.round(w.head.x), hy = Math.round(w.head.y);
+            if (hx===x && hy===y+1) w.hp = 0;
+            for (const s of w.segs){
+              if (Math.round(s.x)===x && Math.round(s.y)===y+1) w.hp = 0;
+            }
+          }
+          for (const col of [orange, cyan]){
+            for (const a of col.ants){
+              if (a.dead || a.caste===CASTE.QUEEN) continue;
+              if (Math.round(a.x)===x && Math.round(a.y)===y+1){
+                a.hp -= 12;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  /* -----------------------------
+     Rooms
+     ----------------------------- */
+  function tickRooms(dt){
+    for (const r of rooms){
+      const cx = Math.floor((r.x0+r.x1)/2);
+      const cy = Math.floor((r.y0+r.y1)/2);
+
+      const depth = Math.max(0, cy - surfaceY);
+      const surfaceLight = weather.sunFactor * clamp(1.0 - depth / 28, 0, 1);
+      const glow = clamp(r.mushE * 0.05, 0, 0.85);
+      r.light = clamp(surfaceLight + glow, 0, 1);
+
+      r.moisture = clamp(r.moisture - dt*0.0035, 0, 1);
+      if (r.type === "COMPOST" && r.compostE > 0.2){
+        r.moisture = clamp(r.moisture + dt*0.010, 0, 1);
+      }
+      if (weather.raining && cy <= surfaceY+6){
+        r.moisture = clamp(r.moisture + dt*0.020, 0, 1);
+      }
+
+      if (r.type === "COMPOST"){
+        r.compostE = Math.max(0, r.compostE - dt * 0.01);
+      }
+
+      if (r.type === "MUSHROOM"){
+        const darkBonus = clamp(1.0 - r.light*1.25, 0.0, 1.0);
+        const moistBonus = clamp((r.moisture - 0.15) / 0.55, 0, 1);
+
+        const compost = rooms.find(rr => rr.owner===r.owner && rr.type==="COMPOST");
+        if (compost){
+          const pull = Math.min(compost.compostE, dt * 0.20);
+          compost.compostE -= pull;
+          r.compostE += pull;
+        }
+
+        const conv = Math.min(r.compostE, dt * 0.18) * darkBonus * moistBonus * TUNE.mushEff;
+        r.compostE -= conv;
+        r.mushE += conv;
+
+        const col = (r.owner==="ORANGE") ? orange : cyan;
+        const bleed = Math.min(r.mushE, dt * 0.12);
+        r.mushE -= bleed;
+        col.storeFungusE += bleed;
+
+        if (Math.random() < dt * 0.6 && resources.mushrooms.length < CAP.mushrooms){
+          const mx = rng.i(r.x0, r.x1);
+          const my = rng.i(r.y0, r.y1);
+          resources.mushrooms.push({x:mx, y:my, e:0.3, glow: clamp(0.3 + r.mushE*0.02, 0.2, 1.0), surface:false});
+        }
+      }
+    }
+  }
+
+  function tickSurfaceMushrooms(dt){
+    for (const m of resources.mushrooms){
+      if (!m.surface) continue;
+      const L = weather.sunFactor;
+      const underLeaf = isUnderLeaf(m.x, m.y);
+      const night = weather.nightFactor > 0.65;
+
+      if (night && underLeaf){
+        const leaf = nearestLeaf(m.x,m.y,1.2);
+        if (leaf){
+          leaf.durability -= dt * 0.06;
+          m.e += dt * 0.08;
+          m.glow = clamp(m.glow + dt*0.02, 0, 0.9);
+          if (leaf.durability <= 0) leaf._dead = true;
+        }
+      } else if (L > 0.45){
+        m.e = Math.max(0, m.e - dt * 0.10);
+        m.glow = Math.max(0, m.glow - dt * 0.04);
+      }
+
+      if (!underLeaf && L > 0.75 && m.e > 1.2){
+        resources.foodPacks.push({x:m.x, y:surfaceY, e: 8 + m.e*3});
+        m.e = 0;
+        m.glow = 0;
+      }
+    }
+  }
+
+  function tickMealwormPens(dt){
+    for (const mw of mealworms){
+      if (mw.dead) continue;
+      const mx = Math.round(mw.x), my = Math.round(mw.y);
+      const r = roomAt(mx,my);
+      const inPen = !!(r && r.type==="MUSHROOM" && r.light > 0.22);
+      if (inPen && mw.milk > 0.2){
+        const col = (mx < W/2) ? orange : cyan;
+        const take = Math.min(mw.milk, dt * 0.10);
+        mw.milk -= take;
+        col.storeMilkE += take;
+      }
+    }
+  }
+
+  function tickBeetleEggs(dt){
+    const night = weather.nightFactor > 0.65;
+    if (!night) return;
+    for (const l of resources.leaves){
+      if (!l.egg || l._dead) continue;
+      if (Math.random() < dt * 0.15){
+        resources.corpses.push({x: l.x, y: surfaceY, e: 1.2, kind:"larva"});
+        l._dead = true;
+      }
+    }
+  }
+
+  // Fixed wandering: defined, stable, and always on surface.
+  function mealwormWander(mw, dt){
+    mw.y = surfaceY;
+    const leaf = nearestLeaf(mw.x, surfaceY, 10);
+    if (leaf && leaf.durability > 0.35 && Math.random() < 0.75){
+      const dir = Math.sign(leaf.x - mw.x) || (Math.random() < 0.5 ? -1 : 1);
+      mw.x = clamp(mw.x + dir * dt * 1.2, 2, W-3);
+    } else {
+      const dir = (Math.random() < 0.5) ? -1 : 1;
+      mw.x = clamp(mw.x + dir * dt * 1.0, 2, W-3);
+    }
+  }
+
+  /* -----------------------------
+     Spawners and weather
+     ----------------------------- */
+  function tickSpawns(dt){
+    if (Math.random() < dt * 0.30 * TUNE.leafMult) spawnLeaf();
+
+    const night = weather.nightFactor > 0.65;
+    if (night && Math.random() < dt * 0.08 && resources.mushrooms.filter(m=>m.surface).length < 18){
+      const candidates = resources.leaves.filter(l=>!l._dead && !l.egg && l.durability>0.5);
+      const l = candidates.length ? rng.pick(candidates) : null;
+      if (l) spawnSurfaceMushroomUnderLeaf(Math.round(l.x));
+    }
+
+    if (!night && mealworms.length < CAP.mealworms && Math.random() < dt * 0.030){
+      const x = rng.pick([Math.floor(W*0.2), Math.floor(W*0.5), Math.floor(W*0.8)]) + rng.i(-6,6);
+      mealworms.push(new Mealworm(clamp(x,2,W-3), surfaceY));
+    }
+
+    if (beetles.length < CAP.beetles && Math.random() < dt * 0.020){
+      const x = rng.i(8,W-9);
+      const y = rng.i(surfaceY+38, H-6);
+      beetles.push(new Beetle(x,y));
+    }
+
+    orange.recomputeCounts();
+    cyan.recomputeCounts();
+    const anyWarriors = orange.hasWarrior || cyan.hasWarrior;
+
+    const seriousDig = (orange.deepestDig >= TUNE.wormSmellDepth) || (cyan.deepestDig >= TUNE.wormSmellDepth);
+    const rainWash = (tNow - weather.lastRainEnd < 45) && !weather.raining;
+
+    if (anyWarriors && (seriousDig || rainWash) && worms.length < CAP.worms){
+      if (Math.random() < dt * 0.010){
+        const count = (Math.random() < 0.6) ? 1 : 2;
+        for (let k=0;k<count;k++){
+          if (worms.length >= CAP.worms) break;
+          const x = rng.i(10, W-11);
+          const y = rng.i(surfaceY + 55, H-10);
+          worms.push(new Worm(x,y,8));
+        }
+      }
+    }
+
+    if (!weather.raining && Math.random() < dt * 0.0022){
+      weather.raining = true;
+      weather.rainT = 10 + rng.f()*18;
+    }
+  }
+
+  function tickWeather(dt){
+    weather.tod = (weather.tod + dt * weather.todSpeed) % 1.0;
+
+    const dayCurve = 0.5 - 0.5 * Math.cos(weather.tod * Math.PI * 2);
+    const sunUp = clamp(dayCurve, 0, 1);
+    weather.nightFactor = clamp(1 - sunUp, 0, 1);
+
+    let cover = 0.0;
+    for (const c of clouds){
+      c.x += dt * c.v;
+      if (c.x > 1.1) c.x = -0.1;
+      const center = 0.5;
+      const d = Math.abs(c.x - center);
+      cover += Math.exp(-d*d / (2*(0.12*c.s)*(0.12*c.s))) * 0.10;
+    }
+    cover = clamp(cover, 0, 0.55);
+    weather.cloudCover = cover;
+
+    weather.sunFactor = clamp(TUNE.solar * (0.55 + 0.45 * sunUp) * (1 - cover), 0, 1);
+
+    if (weather.raining){
+      weather.rainT -= dt;
+      if (weather.rainT <= 0){
+        weather.raining = false;
+        weather.lastRainEnd = tNow;
+      }
+    }
+  }
+
+  function rebuildLightField(){
+    for (let y=0;y<H;y++){
+      for (let x=0;x<W;x++){
+        const i = idx(x,y);
+        if (y < surfaceY) { light[i] = 1.0 * (0.4 + 0.6*(1-weather.nightFactor)); continue; }
+        const depth = y - surfaceY;
+        const base = weather.sunFactor * clamp(1.0 - depth/28, 0, 1);
+        light[i] = base * (tile[i] === TILE_TUNNEL ? 0.8 : 1.0);
+      }
+    }
+    for (const m of resources.mushrooms){
+      const r = 5;
+      for (let dy=-r;dy<=r;dy++){
+        for (let dx=-r;dx<=r;dx++){
+          const x = m.x + dx, y = m.y + dy;
+          if (x<0||x>=W||y<0||y>=H) continue;
+          const d2 = dx*dx+dy*dy;
+          if (d2 > r*r) continue;
+          const i = idx(x,y);
+          light[i] = clamp(light[i] + m.glow * 0.08 * Math.exp(-d2/6), 0, 1);
+        }
+      }
+    }
+    for (const r of rooms){
+      for (let y=r.y0;y<=r.y1;y++){
+        for (let x=r.x0;x<=r.x1;x++){
+          light[idx(x,y)] = Math.max(light[idx(x,y)], r.light);
+        }
+      }
+    }
+  }
+
+  /* -----------------------------
+     Codes and end conditions
+     ----------------------------- */
+  function makeTuneCode(){
+    const solarTok = toB36(Math.round(TUNE.solar * 100));
+    const hlTok = toB36(Math.round(TUNE.phHalfLife));
+    const wdTok = toB36(Math.round(TUNE.wormSmellDepth));
+    const sTok = toB36(Math.round(TUNE.scoutPct * 100));
+    const dTok = toB36(Math.round(TUNE.diggerPct * 100));
+    const leafTok = toB36(Math.round(TUNE.leafMult * 100));
+    const mushTok = toB36(Math.round(TUNE.mushEff * 100));
+    const chk = toB36((fromB36(solarTok)+fromB36(hlTok)+fromB36(wdTok)+fromB36(sTok)+fromB36(dTok)+fromB36(leafTok)+fromB36(mushTok)) % 46656);
+    return `LAB1-${toB36(rng.s)}-${solarTok}-${hlTok}-${wdTok}-${sTok}.${dTok}-${leafTok}.${mushTok}-${chk}`;
+  }
+
+  function makeEndCode(reasonTag=""){
+    const tTok = toB36(Math.round(tNow*10));
+    const solarTok = toB36(Math.round(TUNE.solar*100));
+    const hlTok = toB36(Math.round(TUNE.phHalfLife));
+    const packCol = (col) => {
+      const qhp = col

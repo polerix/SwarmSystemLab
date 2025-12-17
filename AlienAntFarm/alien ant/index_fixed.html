@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Alien Ant Farm Simulator - Rebuild + Balance Lab</title>
+  <style>
+    :root{
+      --bg:#05060a;
+
+      --panel:#0c1020ee;
+      --text:#e8ecff;
+      --muted:#aab4ff;
+
+      --soil1:#2a1b12;
+      --soil2:#22160f;
+      --tun1:#0a0f14;
+      --tun2:#071018;
+
+      --rockS:#3a3a43;
+      --rockM:#2f2f38;
+      --rockL:#23232b;
+
+      --orange:#ff8a3c;
+      --cyan:#4de2ff;
+
+      /* solid colors, opacity handled in renderer */
+      --phHome: rgb(120,170,255);
+      --phFood: rgb(120,255,170);
+      --phDanger: rgb(255,120,150);
+
+      --leaf: rgb(84,190,110);
+      --protein: rgb(255,210,130);
+      --spore: rgb(160,255,220);
+      --dirt: rgb(150,105,70);
+    }
+
+    html,body{
+      height:100%;
+      margin:0;
+      background:var(--bg);
+      overflow:hidden;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono","Courier New", monospace;
+    }
+    #c{ position:fixed; inset:0; display:block; }
+
+    /* Status bar */
+    #status{
+      position:fixed; left:0; right:0; top:0;
+      padding:6px 10px;
+      background:linear-gradient(to bottom, rgba(12,16,32,0.92), rgba(12,16,32,0.65));
+      color:var(--text);
+      font-size:12px;
+      line-height:1.2;
+      user-select:none;
+      border-bottom:1px solid rgba(160,180,255,0.14);
+      z-index:10;
+    }
+    .srow{display:flex;gap:10px;align-items:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;transform:translateY(1px)}
+    .dot.orange{background:var(--orange)}
+    .dot.cyan{background:var(--cyan)}
+    .dot.worm{background:#d7d7ff}
+    .dot.beetle{background:#c7c7c7}
+    .pill{padding:1px 6px;border:1px solid rgba(160,180,255,0.2);border-radius:999px;color:var(--muted)}
+    .good{color:#7dff86}
+    .bad{color:#ff5c7a}
+    .warn{color:#ffcc66}
+
+    /* Menu */
+    #menuBtn{
+      position:fixed; left:8px; top:58px;
+      z-index:11;
+      padding:6px 10px;
+      border:1px solid rgba(160,180,255,0.25);
+      background:rgba(10,13,23,0.86);
+      color:var(--text);
+      border-radius:10px;
+      cursor:pointer;
+      user-select:none;
+    }
+    #menuBtn:hover{border-color:rgba(160,180,255,0.45)}
+    #menu{
+      position:fixed; left:8px; top:96px; width:360px;
+      z-index:12;
+      background:var(--panel);
+      border:1px solid rgba(160,180,255,0.25);
+      border-radius:14px;
+      box-shadow:0 10px 30px rgba(0,0,0,0.4);
+      color:var(--text);
+      display:none;
+      user-select:none;
+    }
+    #menuHeader{
+      padding:10px 12px;
+      border-bottom:1px solid rgba(160,180,255,0.18);
+      display:flex;justify-content:space-between;align-items:center;
+      cursor:grab;
+    }
+    #menuHeader .t{font-weight:700;letter-spacing:0.3px}
+    #menuHeader .x{padding:2px 8px;border-radius:10px;border:1px solid rgba(160,180,255,0.22);background:rgba(0,0,0,0.18);cursor:pointer}
+    #menuHeader .x:hover{border-color:rgba(160,180,255,0.45)}
+    #menuBody{padding:10px 12px;font-size:12px;}
+    .row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:6px 0;}
+    .row label{color:var(--muted)}
+    input[type="range"]{width:190px}
+    input[type="checkbox"]{transform:translateY(1px)}
+    button{
+      font-family:inherit;font-size:12px;
+      color:var(--text);
+      background:rgba(0,0,0,0.18);
+      border:1px solid rgba(160,180,255,0.22);
+      border-radius:10px;
+      padding:6px 10px;
+      cursor:pointer;
+    }
+    button:hover{border-color:rgba(160,180,255,0.45)}
+    button.small{padding:4px 8px;border-radius:9px}
+    .sep{height:1px;background:rgba(160,180,255,0.14);margin:10px 0;}
+    details{border:1px solid rgba(160,180,255,0.16);border-radius:12px;padding:8px 10px;background:rgba(0,0,0,0.12)}
+    details summary{cursor:pointer;color:var(--muted)}
+    .hint{color:var(--muted);line-height:1.35;margin-top:6px}
+    .mono{font-family:inherit; font-size:11px; color:rgba(232,236,255,0.92); white-space:pre-wrap; word-break:break-word}
+    .labBox{border:1px solid rgba(160,180,255,0.16); border-radius:12px; padding:8px 10px; background:rgba(0,0,0,0.12)}
+  </style>
+  <script type="importmap">
+    {
+      "imports": {}
+    }
+  </script>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="status">
+  <div class="srow" id="s_orange"><span class="dot orange"></span><span id="st_orange">Orange: ...</span></div>
+  <div class="srow" id="s_cyan"><span class="dot cyan"></span><span id="st_cyan">Cyan: ...</span></div>
+  <div class="srow" id="s_worm"><span class="dot worm"></span><span id="st_worm">Worms: ...</span></div>
+  <div class="srow" id="s_beetle"><span class="dot beetle"></span><span id="st_beetle">Beetles: ...</span></div>
+</div>
+
+<div id="menuBtn">Menu</div>
+
+<div id="menu">
+  <div id="menuHeader">
+    <div class="t">Alien Ant Farm Simulator</div>
+    <div class="x" id="menuClose">Close</div>
+  </div>
+  <div id="menuBody">
+    <div class="row"><label>Base pheromone half-life</label><input id="rngPh" type="range" min="4" max="24" step="1" value="14"><span class="pill" id="valPh">14s</span></div>
+    <div class="row"><label>Solar intensity</label><input id="rngSolar" type="range" min="20" max="120" step="5" value="60"><span class="pill" id="valSolar">60%</span></div>
+    <div class="row"><label>Zoom sensitivity</label><input id="rngZoom" type="range" min="0.5" max="2.0" step="0.1" value="1.2"><span class="pill" id="valZoom">1.2x</span></div>
+
+    <div class="sep"></div>
+
+    <div class="row"><label>Show status lines</label>
+      <span>
+        <label style="margin-right:6px;"><input id="chkSO" type="checkbox" checked>O</label>
+        <label style="margin-right:6px;"><input id="chkSC" type="checkbox" checked>C</label>
+        <label style="margin-right:6px;"><input id="chkSW" type="checkbox" checked>W</label>
+        <label><input id="chkSB" type="checkbox" checked>B</label>
+      </span>
+    </div>
+
+    <div class="row"><label>Music</label>
+      <span>
+        <label style="margin-right:6px;"><input id="chkMusic" type="checkbox">On</label>
+        <span class="pill">default off</span>
+      </span>
+    </div>
+
+    <div class="sep"></div>
+
+    <div class="row">
+      <button id="btnDropFood">Drop Food Pack</button>
+      <button id="btnReset">Reset</button>
+      <button id="btnCenter">Center</button>
+    </div>
+
+    <div class="sep"></div>
+
+    <div class="labBox">
+      <div class="row">
+        <label>Balance Lab</label>
+        <span>
+          <label style="margin-right:6px;"><input id="chkLab" type="checkbox">On</label>
+          <span class="pill">auto-tune</span>
+        </span>
+      </div>
+      <div class="row">
+        <label>Iterations</label>
+        <input id="rngLabIters" type="range" min="1" max="5" step="1" value="3">
+        <span class="pill" id="valLabIters">3</span>
+      </div>
+      <div class="row">
+        <button id="btnRunLab">Run Lab</button>
+        <button id="btnCopyLab" class="small">Copy Lab Code</button>
+        <button id="btnCopyEnd" class="small">Copy End Code</button>
+      </div>
+      <div class="mono" id="labOut">Lab code: (none yet)</div>
+      <div class="mono" id="labParams">Tuning: (none)</div>
+    </div>
+
+    <details style="margin-top:10px;">
+      <summary>Hint</summary>
+      <div class="hint">
+        - Scrollwheel zooms. Drag to pan.<br>
+        - Keyboard: press D to drop a food pack.<br>
+        - Leaves are substrate only (cut and haul). Ants do not eat leaves.<br>
+        - Scouts keep the surface loop alive even when the pantry is full.<br>
+        - Diggers carry dirt to the surface to build a mound.<br>
+        - Balance Lab tries a few parameter sets and applies the best on Reset when enabled.<br>
+      </div>
+    </details>
+  </div>
+</div>
+
+<script type="module" src="./app_fixed.js"></script>
+</body>
+</html>
+

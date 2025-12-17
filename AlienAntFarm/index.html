@@ -1,0 +1,824 @@
+I can’t help you *clone* that exact game (same code, assets, and behavior) without the creator’s permission. That’s basically a copyright speedrun.
+
+But I **can** help you build a **from-scratch HTML5 game in the same “hive sim” spirit** (original code + placeholder art), and you can tune it until it matches the feel you want. Also: the page you linked is password-gated, so I can’t view its details from here. ([itch.io][1])
+
+Here’s a **playable single-file prototype** (top-down, capture hosts, drag to nest, turn into biomass, lay “resin” that must stay connected to the nest, eggs hatch into drones that also capture). Save this as `index.html` and open it.
+
+```html
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>BioHive (original HTML5 prototype)</title>
+  <style>
+    html, body { margin: 0; height: 100%; background:#0b0f10; overflow:hidden; }
+    canvas { display:block; width:100vw; height:100vh; image-rendering: pixelated; }
+    .hud {
+      position: fixed; left: 10px; top: 10px; color: #d7f7ff; font: 13px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      background: rgba(0,0,0,0.45); border: 1px solid rgba(215,247,255,0.18);
+      padding: 10px 12px; border-radius: 10px; max-width: 520px;
+    }
+    .hud b { color:#ffffff; }
+    .hint { color: rgba(215,247,255,0.75); }
+    .warn { color: #ffd27a; }
+  </style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="hud" id="hud"></div>
+
+<script>
+(() => {
+  // ----------------------------
+  // BioHive: original prototype
+  // ----------------------------
+  // Controls:
+  //  - WASD / Arrow keys: move
+  //  - E: pick up / drop a nearby host
+  //  - Right click: place resin tile (costs biomass, must be adjacent to connected resin)
+  //  - Space: drop carried host (where you stand)
+  //  - R: reset
+  //
+  // Goal:
+  //  - Keep the hive connected, harvest biomass, survive patrol spawns.
+
+  const canvas = document.getElementById('c');
+  const hudEl = document.getElementById('hud');
+  const ctx = canvas.getContext('2d', { alpha: false });
+
+  const DPR = Math.max(1, Math.min(2, devicePixelRatio || 1));
+
+  function resize() {
+    canvas.width  = Math.floor(innerWidth * DPR);
+    canvas.height = Math.floor(innerHeight * DPR);
+  }
+  addEventListener('resize', resize, { passive:true });
+  resize();
+
+  // World
+  const TILE = 20;               // world tile size in pixels (world units)
+  const W = 90, H = 60;          // map size in tiles
+  const T_EMPTY = 0, T_WALL = 1, T_RESIN = 2;
+
+  // Gameplay tuning
+  const MOVE_SPEED = 240;        // pixels per second
+  const CARRY_SLOW = 0.62;
+  const RESIN_COST = 2;
+  const EGG_COST = 6;            // biomass to auto-spawn an egg at nest (via drop-off)
+  const EGG_HATCH_SEC = 7.5;
+  const HOST_VALUE = 6;          // biomass gained per host processed
+  const MARINE_SPAWN_EVERY = 18; // seconds
+  const CONNECT_DECAY_SEC = 9;   // disconnected resin decays into empty over time
+
+  // RNG helpers
+  const rnd = (a=1,b=0) => Math.random()*(a-b)+b;
+  const irnd = (a,b=0) => Math.floor(rnd(a,b));
+
+  // Grid
+  let grid, resinAge, connected; // connected marks resin connected to nest
+
+  function idx(x,y){ return y*W + x; }
+  function inb(x,y){ return x>=0 && y>=0 && x<W && y<H; }
+
+  // Entities
+  let t = 0, dt = 0, last = performance.now();
+  let camera = { x: 0, y: 0 };
+
+  let biomass = 8;
+  let eggs = [];     // {x,y, hatchAt}
+  let drones = [];   // {x,y, vx,vy, carryId:null|hostIndex}
+  let hosts = [];    // {x,y, vx,vy, alive, grabbedBy:null|('player'|'drone:'+i)}
+  let marines = [];  // {x,y, vx,vy, shootCd}
+  let kills = 0;
+
+  // Nest is a small connected resin patch at start
+  const nest = { x: Math.floor(W/2), y: Math.floor(H/2), r: 3 };
+
+  // Player
+  const player = { x: (nest.x+0.5)*TILE, y: (nest.y+0.5)*TILE, vx:0, vy:0, carrying: null };
+
+  // Input
+  const keys = new Set();
+  addEventListener('keydown', (e) => {
+    if (e.repeat) return;
+    keys.add(e.key.toLowerCase());
+    if (e.key.toLowerCase() === 'r') init();
+    if (e.key.toLowerCase() === 'e') tryPickupOrDrop();
+  });
+  addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
+
+  // Mouse
+  let mouse = { x: 0, y: 0, down:false, rdown:false };
+  canvas.addEventListener('mousemove', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    mouse.x = (e.clientX - rect.left) * DPR;
+    mouse.y = (e.clientY - rect.top) * DPR;
+  }, { passive:true });
+
+  canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+  canvas.addEventListener('mousedown', (e) => {
+    if (e.button === 2) {
+      placeResinAtMouse();
+    }
+  });
+
+  function worldFromScreen(sx, sy) {
+    return { x: sx/DPR + camera.x, y: sy/DPR + camera.y };
+  }
+
+  // Init / reset
+  function init() {
+    t = 0; biomass = 8; eggs = []; drones = []; hosts = []; marines = []; kills = 0;
+    grid = new Uint8Array(W*H);
+    resinAge = new Float32Array(W*H);
+    connected = new Uint8Array(W*H);
+
+    // Carve map: walls around edges + some random boulders
+    for (let y=0; y<H; y++){
+      for (let x=0; x<W; x++){
+        let v = T_EMPTY;
+        if (x===0 || y===0 || x===W-1 || y===H-1) v = T_WALL;
+        if (Math.random() < 0.06) v = T_WALL;
+        grid[idx(x,y)] = v;
+      }
+    }
+
+    // Clear area near nest
+    for (let y=nest.y-7; y<=nest.y+7; y++){
+      for (let x=nest.x-7; x<=nest.x+7; x++){
+        if (inb(x,y)) grid[idx(x,y)] = T_EMPTY;
+      }
+    }
+
+    // Seed connected resin nest blob
+    for (let y=nest.y-nest.r; y<=nest.y+nest.r; y++){
+      for (let x=nest.x-nest.r; x<=nest.x+nest.r; x++){
+        if (!inb(x,y)) continue;
+        const dx=x-nest.x, dy=y-nest.y;
+        if (dx*dx+dy*dy <= nest.r*nest.r+0.5) grid[idx(x,y)] = T_RESIN;
+      }
+    }
+
+    // Spawn hosts
+    const hostCount = 28;
+    for (let i=0;i<hostCount;i++){
+      const p = randomOpenTileFarFromNest(7);
+      hosts.push({
+        x: (p.x+0.5)*TILE,
+        y: (p.y+0.5)*TILE,
+        vx: rnd(28,-28),
+        vy: rnd(28,-28),
+        alive: true,
+        grabbedBy: null
+      });
+    }
+
+    // Player at nest
+    player.x = (nest.x+0.5)*TILE;
+    player.y = (nest.y+0.5)*TILE;
+    player.vx = 0; player.vy = 0;
+    player.carrying = null;
+
+    // Initial connectivity calc
+    recomputeConnectivity();
+  }
+
+  function randomOpenTileFarFromNest(minDistTiles) {
+    for (let tries=0; tries<5000; tries++){
+      const x = irnd(W-2,1), y = irnd(H-2,1);
+      if (grid[idx(x,y)] !== T_EMPTY) continue;
+      const dx = x - nest.x, dy = y - nest.y;
+      if (dx*dx + dy*dy < minDistTiles*minDistTiles) continue;
+      return {x,y};
+    }
+    return {x: 2, y: 2};
+  }
+
+  // Connectivity: BFS from nest through resin
+  function recomputeConnectivity() {
+    connected.fill(0);
+    const qx = new Int16Array(W*H);
+    const qy = new Int16Array(W*H);
+    let qh=0, qt=0;
+
+    // Start positions: all resin tiles in nest radius
+    // Easier: pick nest tile itself if resin, else any adjacent resin
+    let sx = nest.x, sy = nest.y;
+    if (grid[idx(sx,sy)] !== T_RESIN) {
+      const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+      for (const [dx,dy] of dirs){
+        const nx=sx+dx, ny=sy+dy;
+        if (inb(nx,ny) && grid[idx(nx,ny)]===T_RESIN){ sx=nx; sy=ny; break; }
+      }
+    }
+    if (grid[idx(sx,sy)] !== T_RESIN) return;
+
+    qx[qt]=sx; qy[qt]=sy; qt++;
+    connected[idx(sx,sy)] = 1;
+
+    const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+    while (qh<qt){
+      const x = qx[qh], y = qy[qh]; qh++;
+      for (const [dx,dy] of dirs){
+        const nx=x+dx, ny=y+dy;
+        if (!inb(nx,ny)) continue;
+        const ii = idx(nx,ny);
+        if (connected[ii]) continue;
+        if (grid[ii] !== T_RESIN) continue;
+        connected[ii] = 1;
+        qx[qt]=nx; qy[qt]=ny; qt++;
+      }
+    }
+  }
+
+  function isWalkableTile(tx, ty) {
+    const v = grid[idx(tx,ty)];
+    return v !== T_WALL;
+  }
+
+  function clampToWorld(e) {
+    // Simple collision: keep inside map bounds and avoid walls by pushing out
+    // Approx circle radius
+    const r = 7;
+    e.x = Math.max(r, Math.min(e.x, W*TILE - r));
+    e.y = Math.max(r, Math.min(e.y, H*TILE - r));
+
+    const tx = Math.floor(e.x / TILE);
+    const ty = Math.floor(e.y / TILE);
+    if (!inb(tx,ty)) return;
+
+    if (grid[idx(tx,ty)] === T_WALL) {
+      // push to nearest open neighbor
+      const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+      for (const [dx,dy] of dirs){
+        const nx=tx+dx, ny=ty+dy;
+        if (!inb(nx,ny)) continue;
+        if (grid[idx(nx,ny)] !== T_WALL) {
+          e.x = (nx+0.5)*TILE;
+          e.y = (ny+0.5)*TILE;
+          e.vx *= 0.25; e.vy *= 0.25;
+          return;
+        }
+      }
+    }
+  }
+
+  function tryPickupOrDrop() {
+    // If carrying, drop
+    if (player.carrying !== null) {
+      const h = hosts[player.carrying];
+      if (h && h.alive) {
+        h.grabbedBy = null;
+        h.x = player.x + rnd(10,-10);
+        h.y = player.y + rnd(10,-10);
+        h.vx = player.vx * 0.2;
+        h.vy = player.vy * 0.2;
+      }
+      player.carrying = null;
+      return;
+    }
+
+    // Pick nearest alive host within range
+    let best = -1, bestD2 = 999999;
+    for (let i=0;i<hosts.length;i++){
+      const h = hosts[i];
+      if (!h.alive || h.grabbedBy) continue;
+      const dx=h.x-player.x, dy=h.y-player.y;
+      const d2 = dx*dx+dy*dy;
+      if (d2 < bestD2 && d2 < (28*28)) { bestD2 = d2; best = i; }
+    }
+    if (best !== -1) {
+      player.carrying = best;
+      hosts[best].grabbedBy = 'player';
+    }
+  }
+
+  function placeResinAtMouse() {
+    // Place resin on the tile under mouse if rules allow
+    const w = worldFromScreen(mouse.x, mouse.y);
+    const tx = Math.floor(w.x / TILE);
+    const ty = Math.floor(w.y / TILE);
+    if (!inb(tx,ty)) return;
+    const i = idx(tx,ty);
+
+    if (grid[i] !== T_EMPTY) return;
+    if (biomass < RESIN_COST) return;
+
+    // Must be adjacent to a connected resin tile
+    const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+    let ok = false;
+    for (const [dx,dy] of dirs){
+      const nx=tx+dx, ny=ty+dy;
+      if (!inb(nx,ny)) continue;
+      const ni = idx(nx,ny);
+      if (grid[ni] === T_RESIN && connected[ni] === 1) { ok = true; break; }
+    }
+    if (!ok) return;
+
+    grid[i] = T_RESIN;
+    resinAge[i] = 0;
+    biomass -= RESIN_COST;
+    recomputeConnectivity();
+  }
+
+  function spawnEggAtNest() {
+    // Find a resin tile near nest to place egg on
+    for (let tries=0; tries<120; tries++){
+      const tx = nest.x + irnd(5,-5);
+      const ty = nest.y + irnd(5,-5);
+      if (!inb(tx,ty)) continue;
+      if (grid[idx(tx,ty)] !== T_RESIN) continue;
+      eggs.push({ x:(tx+0.5)*TILE, y:(ty+0.5)*TILE, hatchAt: t + EGG_HATCH_SEC });
+      return true;
+    }
+    return false;
+  }
+
+  function hatchEgg(i) {
+    const e = eggs[i];
+    drones.push({ x:e.x, y:e.y, vx:0, vy:0, carryId: null });
+    eggs.splice(i,1);
+  }
+
+  function spawnMarine() {
+    // Spawn at random edge opening
+    let pos = null;
+    for (let tries=0; tries<800; tries++){
+      const side = irnd(4,0);
+      let tx=1, ty=1;
+      if (side===0) { tx = 1; ty = irnd(H-2,1); }
+      if (side===1) { tx = W-2; ty = irnd(H-2,1); }
+      if (side===2) { ty = 1; tx = irnd(W-2,1); }
+      if (side===3) { ty = H-2; tx = irnd(W-2,1); }
+      if (grid[idx(tx,ty)] === T_EMPTY) { pos = {tx,ty}; break; }
+    }
+    if (!pos) return;
+    marines.push({ x:(pos.tx+0.5)*TILE, y:(pos.ty+0.5)*TILE, vx:0, vy:0, shootCd: 0 });
+  }
+
+  // AI helpers
+  function nearestHost(x,y) {
+    let best=-1, bestD2=1e12;
+    for (let i=0;i<hosts.length;i++){
+      const h=hosts[i];
+      if (!h.alive || h.grabbedBy) continue;
+      const dx=h.x-x, dy=h.y-y;
+      const d2=dx*dx+dy*dy;
+      if (d2<bestD2){ bestD2=d2; best=i; }
+    }
+    return best;
+  }
+
+  function nearestDrone(x,y) {
+    let best=-1, bestD2=1e12;
+    for (let i=0;i<drones.length;i++){
+      const d=drones[i];
+      const dx=d.x-x, dy=d.y-y;
+      const d2=dx*dx+dy*dy;
+      if (d2<bestD2){ bestD2=d2; best=i; }
+    }
+    return best;
+  }
+
+  // Main update
+  let nextMarineAt = MARINE_SPAWN_EVERY;
+
+  function update() {
+    const now = performance.now();
+    dt = Math.min(0.033, (now - last) / 1000);
+    last = now;
+    t += dt;
+
+    // Player input
+    const up    = keys.has('w') || keys.has('arrowup');
+    const down  = keys.has('s') || keys.has('arrowdown');
+    const left  = keys.has('a') || keys.has('arrowleft');
+    const right = keys.has('d') || keys.has('arrowright');
+
+    let ax = (right?1:0) - (left?1:0);
+    let ay = (down?1:0) - (up?1:0);
+    const len = Math.hypot(ax,ay) || 1;
+    ax/=len; ay/=len;
+
+    let speed = MOVE_SPEED;
+    if (player.carrying !== null) speed *= CARRY_SLOW;
+
+    player.vx = ax * speed;
+    player.vy = ay * speed;
+    player.x += player.vx * dt;
+    player.y += player.vy * dt;
+    clampToWorld(player);
+
+    // Carry follows player
+    if (player.carrying !== null) {
+      const h = hosts[player.carrying];
+      if (h && h.alive) {
+        h.x = player.x + rnd(8,-8);
+        h.y = player.y + rnd(8,-8);
+        h.vx = 0; h.vy = 0;
+      } else {
+        player.carrying = null;
+      }
+    }
+
+    // Drop carried host instantly with Space (same as E drop but without toggling pickup)
+    if (keys.has(' ')) {
+      if (player.carrying !== null) {
+        const id = player.carrying;
+        const h = hosts[id];
+        if (h && h.alive) {
+          h.grabbedBy = null;
+          h.x = player.x; h.y = player.y;
+          h.vx = 0; h.vy = 0;
+        }
+        player.carrying = null;
+        keys.delete(' ');
+      }
+    }
+
+    // Hosts wander if free
+    for (const h of hosts) {
+      if (!h.alive) continue;
+      if (h.grabbedBy) continue;
+
+      if (Math.random() < 0.04) { h.vx += rnd(25,-25); h.vy += rnd(25,-25); }
+      const s = 56;
+      const vlen = Math.hypot(h.vx,h.vy) || 1;
+      h.vx = (h.vx/vlen)*Math.min(vlen,s);
+      h.vy = (h.vy/vlen)*Math.min(vlen,s);
+
+      h.x += h.vx * dt;
+      h.y += h.vy * dt;
+      clampToWorld(h);
+
+      // Bounce off walls gently
+      const tx = Math.floor(h.x / TILE), ty = Math.floor(h.y / TILE);
+      if (inb(tx,ty) && grid[idx(tx,ty)] === T_WALL) {
+        h.vx *= -0.6; h.vy *= -0.6;
+      }
+    }
+
+    // If player brings a host to nest resin, process it
+    processDropOff('player', player.x, player.y, player.carrying);
+
+    // Eggs hatch
+    for (let i=eggs.length-1; i>=0; i--) {
+      if (t >= eggs[i].hatchAt) hatchEgg(i);
+    }
+
+    // Drones behavior
+    for (let i=0; i<drones.length; i++) {
+      const d = drones[i];
+
+      let targetX = d.x, targetY = d.y;
+      let desiredSpeed = 170;
+
+      if (d.carryId === null) {
+        const hi = nearestHost(d.x, d.y);
+        if (hi !== -1) {
+          const h = hosts[hi];
+          const dx=h.x-d.x, dy=h.y-d.y;
+          const dist = Math.hypot(dx,dy);
+          if (dist < 18) {
+            d.carryId = hi;
+            h.grabbedBy = 'drone:' + i;
+          } else {
+            targetX = h.x; targetY = h.y;
+          }
+        } else {
+          // idle near nest
+          targetX = (nest.x+0.5)*TILE + Math.sin(t*0.8 + i)*60;
+          targetY = (nest.y+0.5)*TILE + Math.cos(t*0.7 + i)*60;
+        }
+      } else {
+        // Carrying: return to nest
+        targetX = (nest.x+0.5)*TILE;
+        targetY = (nest.y+0.5)*TILE;
+        desiredSpeed = 150;
+
+        const h = hosts[d.carryId];
+        if (h && h.alive) {
+          h.x = d.x + rnd(7,-7);
+          h.y = d.y + rnd(7,-7);
+          h.vx = 0; h.vy = 0;
+        } else {
+          d.carryId = null;
+        }
+      }
+
+      const dx = targetX - d.x, dy = targetY - d.y;
+      const dist = Math.hypot(dx,dy) || 1;
+      const ux = dx/dist, uy = dy/dist;
+
+      d.vx = ux * desiredSpeed;
+      d.vy = uy * desiredSpeed;
+      d.x += d.vx * dt;
+      d.y += d.vy * dt;
+      clampToWorld(d);
+
+      // Drone drop-off processing
+      if (d.carryId !== null) processDropOff('drone', d.x, d.y, d.carryId, i);
+    }
+
+    // Marines spawn and hunt drones
+    if (t >= nextMarineAt) {
+      spawnMarine();
+      nextMarineAt += MARINE_SPAWN_EVERY;
+    }
+
+    for (let i=0; i<marines.length; i++) {
+      const m = marines[i];
+      m.shootCd = Math.max(0, m.shootCd - dt);
+
+      // Move toward nearest connected resin tile (smells the hive)
+      const goal = nearestConnectedResin(m.x, m.y) || { x:(nest.x+0.5)*TILE, y:(nest.y+0.5)*TILE };
+      const dx = goal.x - m.x, dy = goal.y - m.y;
+      const dist = Math.hypot(dx,dy) || 1;
+      const ux = dx/dist, uy = dy/dist;
+
+      const sp = 120;
+      m.vx = ux*sp; m.vy = uy*sp;
+      m.x += m.vx*dt; m.y += m.vy*dt;
+      clampToWorld(m);
+
+      // Shoot nearest drone if close
+      const di = nearestDrone(m.x, m.y);
+      if (di !== -1) {
+        const d = drones[di];
+        const ddx = d.x - m.x, ddy = d.y - m.y;
+        const d2 = ddx*ddx + ddy*ddy;
+        if (d2 < 220*220 && m.shootCd <= 0) {
+          // remove drone
+          // If it was carrying, release host
+          if (d.carryId !== null) {
+            const h = hosts[d.carryId];
+            if (h && h.alive) h.grabbedBy = null;
+          }
+          drones.splice(di,1);
+          kills++;
+          m.shootCd = 0.75;
+        }
+      }
+    }
+
+    // Resin decay if disconnected
+    // Also gradually age all resin tiles
+    let changed = false;
+    for (let y=0;y<H;y++){
+      for (let x=0;x<W;x++){
+        const i = idx(x,y);
+        if (grid[i] !== T_RESIN) continue;
+        resinAge[i] += dt;
+        if (connected[i] === 0) {
+          if (resinAge[i] >= CONNECT_DECAY_SEC) {
+            grid[i] = T_EMPTY;
+            resinAge[i] = 0;
+            changed = true;
+          }
+        } else {
+          resinAge[i] = 0; // reset age if connected
+        }
+      }
+    }
+    if (changed) recomputeConnectivity();
+
+    // Camera follows player
+    const targetCamX = player.x - (canvas.width/DPR)/2;
+    const targetCamY = player.y - (canvas.height/DPR)/2;
+    camera.x += (targetCamX - camera.x) * Math.min(1, dt*7);
+    camera.y += (targetCamY - camera.y) * Math.min(1, dt*7);
+
+    // Clamp camera to world bounds
+    camera.x = Math.max(0, Math.min(camera.x, W*TILE - canvas.width/DPR));
+    camera.y = Math.max(0, Math.min(camera.y, H*TILE - canvas.height/DPR));
+
+    render();
+    requestAnimationFrame(update);
+  }
+
+  function nearestConnectedResin(x,y) {
+    // Quick search: sample a few random resin tiles; good enough for prototype
+    let best=null, bestD2=1e12;
+    for (let k=0;k<90;k++){
+      const tx = irnd(W-2,1), ty = irnd(H-2,1);
+      const i = idx(tx,ty);
+      if (grid[i] !== T_RESIN || connected[i]===0) continue;
+      const cx = (tx+0.5)*TILE, cy = (ty+0.5)*TILE;
+      const dx=cx-x, dy=cy-y;
+      const d2=dx*dx+dy*dy;
+      if (d2<bestD2){ bestD2=d2; best={x:cx,y:cy}; }
+    }
+    return best;
+  }
+
+  function processDropOff(by, x, y, hostId, droneIndex=null) {
+    if (hostId === null || hostId === undefined) return;
+    const h = hosts[hostId];
+    if (!h || !h.alive) return;
+
+    // Must be on connected resin near nest
+    const tx = Math.floor(x / TILE), ty = Math.floor(y / TILE);
+    if (!inb(tx,ty)) return;
+    const i = idx(tx,ty);
+    if (grid[i] !== T_RESIN || connected[i] === 0) return;
+
+    // Also within nest-ish radius
+    const nx = (nest.x+0.5)*TILE, ny = (nest.y+0.5)*TILE;
+    const dx = x - nx, dy = y - ny;
+    if (dx*dx + dy*dy > (120*120)) return;
+
+    // Convert host to biomass, possibly spawn egg if enough biomass
+    h.alive = false;
+    h.grabbedBy = null;
+
+    biomass += HOST_VALUE;
+
+    if (biomass >= EGG_COST) {
+      biomass -= EGG_COST;
+      spawnEggAtNest();
+    }
+
+    // Clear carrier reference
+    if (by === 'player') player.carrying = null;
+    if (by === 'drone' && droneIndex !== null) {
+      const d = drones[droneIndex];
+      if (d) d.carryId = null;
+    }
+  }
+
+  // Rendering
+  function render() {
+    ctx.setTransform(1,0,0,1,0,0);
+    ctx.fillStyle = '#061012';
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+
+    // World transform
+    ctx.setTransform(DPR,0,0,DPR,-camera.x*DPR,-camera.y*DPR);
+
+    // Draw tiles
+    const viewX0 = Math.floor(camera.x / TILE) - 1;
+    const viewY0 = Math.floor(camera.y / TILE) - 1;
+    const viewX1 = Math.floor((camera.x + canvas.width/DPR) / TILE) + 2;
+    const viewY1 = Math.floor((camera.y + canvas.height/DPR) / TILE) + 2;
+
+    for (let y=viewY0; y<=viewY1; y++){
+      for (let x=viewX0; x<=viewX1; x++){
+        if (!inb(x,y)) continue;
+        const i = idx(x,y);
+        const v = grid[i];
+
+        if (v === T_WALL) {
+          ctx.fillStyle = '#0f1b1f';
+          ctx.fillRect(x*TILE, y*TILE, TILE, TILE);
+          ctx.fillStyle = 'rgba(255,255,255,0.04)';
+          ctx.fillRect(x*TILE+2, y*TILE+2, TILE-4, TILE-4);
+        } else if (v === T_EMPTY) {
+          // subtle floor noise
+          ctx.fillStyle = '#071416';
+          ctx.fillRect(x*TILE, y*TILE, TILE, TILE);
+        } else if (v === T_RESIN) {
+          const c = connected[i] ? 1 : 0;
+          ctx.fillStyle = c ? '#133332' : '#1a1a1a';
+          ctx.fillRect(x*TILE, y*TILE, TILE, TILE);
+          ctx.fillStyle = c ? 'rgba(120,255,230,0.08)' : 'rgba(255,190,120,0.05)';
+          ctx.fillRect(x*TILE+3, y*TILE+3, TILE-6, TILE-6);
+        }
+      }
+    }
+
+    // Nest marker
+    ctx.strokeStyle = 'rgba(180,255,250,0.25)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc((nest.x+0.5)*TILE, (nest.y+0.5)*TILE, 120, 0, Math.PI*2);
+    ctx.stroke();
+
+    // Eggs
+    for (const e of eggs) {
+      const p = Math.max(0, Math.min(1, (e.hatchAt - t) / EGG_HATCH_SEC));
+      ctx.fillStyle = `rgba(180,255,230,${0.18 + 0.55*(1-p)})`;
+      ctx.beginPath();
+      ctx.ellipse(e.x, e.y, 6, 9, 0, 0, Math.PI*2);
+      ctx.fill();
+    }
+
+    // Hosts
+    for (const h of hosts) {
+      if (!h.alive) continue;
+      ctx.fillStyle = '#cdd6d8';
+      ctx.beginPath();
+      ctx.arc(h.x, h.y, 6, 0, Math.PI*2);
+      ctx.fill();
+
+      // Tiny direction mark
+      ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+      ctx.beginPath();
+      ctx.moveTo(h.x, h.y);
+      ctx.lineTo(h.x + (h.vx*0.05), h.y + (h.vy*0.05));
+      ctx.stroke();
+    }
+
+    // Drones
+    for (const d of drones) {
+      ctx.fillStyle = '#7dffe1';
+      ctx.beginPath();
+      ctx.arc(d.x, d.y, 7.5, 0, Math.PI*2);
+      ctx.fill();
+
+      if (d.carryId !== null) {
+        ctx.strokeStyle = 'rgba(125,255,225,0.35)';
+        ctx.beginPath();
+        ctx.arc(d.x, d.y, 13, 0, Math.PI*2);
+        ctx.stroke();
+      }
+    }
+
+    // Marines
+    for (const m of marines) {
+      ctx.fillStyle = '#ffcf7d';
+      ctx.beginPath();
+      ctx.rect(m.x-6, m.y-6, 12, 12);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(0,0,0,0.3)';
+      ctx.fillRect(m.x-2, m.y-7, 4, 3);
+    }
+
+    // Player
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(player.x, player.y, 9, 0, Math.PI*2);
+    ctx.fill();
+
+    ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+    ctx.beginPath();
+    ctx.arc(player.x, player.y, 12, 0, Math.PI*2);
+    ctx.stroke();
+
+    if (player.carrying !== null) {
+      ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+      ctx.beginPath();
+      ctx.arc(player.x, player.y, 16, 0, Math.PI*2);
+      ctx.stroke();
+    }
+
+    // Build preview (right-click tile)
+    const w = worldFromScreen(mouse.x, mouse.y);
+    const tx = Math.floor(w.x / TILE);
+    const ty = Math.floor(w.y / TILE);
+    if (inb(tx,ty)) {
+      const i = idx(tx,ty);
+      const can = grid[i]===T_EMPTY && biomass>=RESIN_COST && adjacentConnectedResin(tx,ty);
+      ctx.strokeStyle = can ? 'rgba(125,255,225,0.55)' : 'rgba(255,160,120,0.35)';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(tx*TILE+2, ty*TILE+2, TILE-4, TILE-4);
+    }
+
+    // HUD
+    const resinCount = countTiles(T_RESIN);
+    const connCount = countConnectedResin();
+    const connPct = resinCount ? Math.round((connCount/resinCount)*100) : 0;
+    const aliveHosts = hosts.reduce((a,h)=>a+(h.alive?1:0),0);
+
+    hudEl.innerHTML =
+      `<b>BioHive</b> (original prototype)<br>` +
+      `Biomass: <b>${biomass}</b> &nbsp; Drones: <b>${drones.length}</b> &nbsp; Eggs: <b>${eggs.length}</b> &nbsp; Hosts left: <b>${aliveHosts}</b><br>` +
+      `Resin: <b>${connCount}</b> connected / <b>${resinCount}</b> total (<b>${connPct}%</b>) &nbsp; Patrol losses: <b>${kills}</b><br>` +
+      `<span class="hint">WASD move, E pick/drop, Space drop, Right click place resin (cost ${RESIN_COST}), R reset</span><br>` +
+      `<span class="warn">Tip: disconnected resin decays. Build outward in a single connected network.</span>`;
+  }
+
+  function adjacentConnectedResin(tx,ty) {
+    const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+    for (const [dx,dy] of dirs){
+      const nx=tx+dx, ny=ty+dy;
+      if (!inb(nx,ny)) continue;
+      const ni=idx(nx,ny);
+      if (grid[ni]===T_RESIN && connected[ni]===1) return true;
+    }
+    return false;
+  }
+
+  function countTiles(type) {
+    let c=0;
+    for (let i=0;i<grid.length;i++) if (grid[i]===type) c++;
+    return c;
+  }
+  function countConnectedResin() {
+    let c=0;
+    for (let i=0;i<grid.length;i++) if (grid[i]===T_RESIN && connected[i]===1) c++;
+    return c;
+  }
+
+  // Start
+  init();
+  requestAnimationFrame(update);
+})();
+</script>
+</body>
+</html>
+```
+
+If you tell me (in your own words) the **3 to 6 core mechanics** in the itch build (camera style, how hive grows, what “win/lose” is, any special units), I can reshape this into a much closer “same vibe, different DNA” version while still staying on the right side of ownership.
+
+[1]: https://gfx47.itch.io/xenohive "Xeno Hive by GFX47 - itch.io"

@@ -1,0 +1,766 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Ant Farm Sandbox (Refactored)</title>
+  <style>
+    :root{
+      --bg:#0b1020;
+      --fg:#d7e2ff;
+      --muted:#94a3b8;
+      --panel:rgba(10,14,25,.82);
+      --border:rgba(255,255,255,.12);
+      --accent:#64ffda;
+      --danger:#ff5c7a;
+    }
+    html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font:14px/1.35 ui-sans-serif,system-ui,Segoe UI,Roboto,Helvetica,Arial;}
+    canvas{display:block;width:100vw;height:100vh;image-rendering:pixelated;cursor:grab;}
+    canvas:active{cursor:grabbing;}
+
+    .hud{
+      position:fixed;left:12px;top:12px;z-index:10;
+      display:flex;gap:10px;align-items:flex-start;
+    }
+    .btn{
+      border:1px solid var(--border);
+      background:var(--panel);
+      color:var(--fg);
+      padding:8px 10px;border-radius:10px;
+      user-select:none;cursor:pointer;
+      box-shadow:0 10px 30px rgba(0,0,0,.35);
+    }
+    .btn:hover{border-color:rgba(255,255,255,.22)}
+    .panel{
+      width:320px;
+      border:1px solid var(--border);
+      background:var(--panel);
+      border-radius:12px;
+      padding:12px;
+      box-shadow:0 10px 30px rgba(0,0,0,.35);
+      backdrop-filter:blur(6px);
+      display:none;
+    }
+    .panel.open{display:block;}
+    .row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:8px 0;}
+    .row label{color:var(--muted);font-size:12px}
+    input[type="range"]{width:180px}
+    input[type="text"]{
+      width:100%;
+      border:1px solid var(--border);
+      background:rgba(0,0,0,.25);
+      color:var(--fg);
+      border-radius:10px;
+      padding:8px 10px;
+      outline:none;
+    }
+    .tiny{font-size:12px;color:var(--muted)}
+    .statusbar{
+      position:fixed;left:12px;right:12px;bottom:12px;z-index:10;
+      display:flex;gap:10px;flex-wrap:wrap;
+    }
+    .chip{
+      border:1px solid var(--border);
+      background:var(--panel);
+      border-radius:999px;
+      padding:6px 10px;
+      color:var(--fg);
+      box-shadow:0 10px 30px rgba(0,0,0,.35);
+      font-size:12px;
+    }
+    .fatal{
+      position:fixed;inset:0;z-index:9999;
+      display:none;
+      background:rgba(0,0,0,.78);
+      padding:20px;
+    }
+    .fatal .box{
+      max-width:900px;margin:0 auto;
+      border:1px solid rgba(255,255,255,.18);
+      background:rgba(15,20,35,.92);
+      border-radius:14px;
+      padding:14px 16px;
+      box-shadow:0 20px 60px rgba(0,0,0,.55);
+    }
+    .fatal h2{margin:0 0 8px 0;color:var(--danger);font-size:16px}
+    .fatal pre{
+      margin:0;
+      white-space:pre-wrap;
+      word-break:break-word;
+      color:var(--fg);
+      font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+      font-size:12px;
+      line-height:1.35;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="c"></canvas>
+
+  <div class="hud">
+    <div id="menuBtn" class="btn">Menu</div>
+    <div id="panel" class="panel">
+      <div class="row">
+        <label>Pause</label>
+        <div id="pauseBtn" class="btn" style="padding:6px 10px;border-radius:10px;">Running</div>
+      </div>
+
+      <div class="row">
+        <label>Zoom</label>
+        <input id="zoom" type="range" min="0.6" max="3.0" step="0.05" value="1.1" />
+      </div>
+
+      <div class="row">
+        <label>Sim speed</label>
+        <input id="speed" type="range" min="0.2" max="3.0" step="0.05" value="1.0" />
+      </div>
+
+      <div class="row">
+        <label>Pheromones</label>
+        <div id="pherBtn" class="btn" style="padding:6px 10px;border-radius:10px;">Off</div>
+      </div>
+
+      <div class="row">
+        <label>Reset</label>
+        <div id="resetBtn" class="btn" style="padding:6px 10px;border-radius:10px;">Reset world</div>
+      </div>
+
+      <div class="row" style="flex-direction:column;align-items:stretch">
+        <label>Seed code (optional)</label>
+        <input id="seed" type="text" placeholder="leave blank for random" />
+        <div class="tiny" style="margin-top:6px">
+          Tip: if anything breaks, the red overlay shows the exact JS error. Open DevTools Console too.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="statusbar">
+    <div id="chipTime" class="chip">time: 0.0</div>
+    <div id="chipPhase" class="chip">phase: day</div>
+    <div id="chipO" class="chip">orange: 0 ants</div>
+    <div id="chipC" class="chip">cyan: 0 ants</div>
+    <div id="chipSurf" class="chip">surface: 0 leaves</div>
+  </div>
+
+  <div id="fatal" class="fatal">
+    <div class="box">
+      <h2>Runtime error (this is why it “stops loading”)</h2>
+      <pre id="fatalText"></pre>
+    </div>
+  </div>
+
+<script>
+(() => {
+  "use strict";
+
+  // ---------- Fatal error overlay ----------
+  const fatal = (err) => {
+    const f = document.getElementById("fatal");
+    const t = document.getElementById("fatalText");
+    if (!f || !t) return;
+    f.style.display = "block";
+    t.textContent = String(err && err.stack ? err.stack : err);
+    console.error(err);
+  };
+
+  window.addEventListener("error", (e) => fatal(e.error || e.message));
+  window.addEventListener("unhandledrejection", (e) => fatal(e.reason || e));
+
+  // ---------- Utils ----------
+  const clamp = (v, a, b) => (v < a ? a : (v > b ? b : v));
+  const lerp = (a, b, t) => a + (b - a) * t;
+
+  class RNG {
+    constructor(seed) {
+      // xorshift32
+      this.s = (seed >>> 0) || 0xA53C9E1D;
+    }
+    nextU32() {
+      let x = this.s;
+      x ^= x << 13; x >>>= 0;
+      x ^= x >>> 17;
+      x ^= x << 5;  x >>>= 0;
+      this.s = x >>> 0;
+      return this.s;
+    }
+    f() { return this.nextU32() / 4294967296; }
+    i(a, b) { return a + (this.nextU32() % (b - a + 1)); }
+    pick(arr) { return arr.length ? arr[(this.nextU32() % arr.length)] : null; }
+  }
+
+  // ---------- DOM ready guard (prevents null element crashes) ----------
+  const onReady = (fn) => {
+    if (document.readyState === "complete" || document.readyState === "interactive") fn();
+    else document.addEventListener("DOMContentLoaded", fn, { once: true });
+  };
+
+  onReady(() => {
+    try {
+      // ---------- DOM ----------
+      const canvas = document.getElementById("c");
+      if (!canvas) throw new Error("Canvas #c not found");
+      const ctx = canvas.getContext("2d", { alpha: false });
+      if (!ctx) throw new Error("2D context not available");
+
+      const menuBtn = document.getElementById("menuBtn");
+      const panel = document.getElementById("panel");
+      const pauseBtn = document.getElementById("pauseBtn");
+      const resetBtn = document.getElementById("resetBtn");
+      const pherBtn = document.getElementById("pherBtn");
+      const zoomEl = document.getElementById("zoom");
+      const speedEl = document.getElementById("speed");
+      const seedEl = document.getElementById("seed");
+
+      const chipTime = document.getElementById("chipTime");
+      const chipPhase = document.getElementById("chipPhase");
+      const chipO = document.getElementById("chipO");
+      const chipC = document.getElementById("chipC");
+      const chipSurf = document.getElementById("chipSurf");
+
+      // ---------- Canvas sizing ----------
+      const DPR = () => (window.devicePixelRatio || 1);
+      let vpw = 0, vph = 0; // CSS pixels
+      const resize = () => {
+        const dpr = DPR();
+        vpw = Math.max(1, window.innerWidth);
+        vph = Math.max(1, window.innerHeight);
+        canvas.width = Math.floor(vpw * dpr);
+        canvas.height = Math.floor(vph * dpr);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.imageSmoothingEnabled = false;
+      };
+      window.addEventListener("resize", resize);
+      resize();
+
+      // ---------- World ----------
+      const TILE = 7;
+
+      const W = 220;
+      const H = 70;
+      const surfaceY = Math.floor(H * 0.36);
+
+      const T_SOIL = 0;
+      const T_TUN = 1;
+      const T_ROCK = 2;
+
+      const idx = (x, y) => x + y * W;
+
+      // Main state (resettable)
+      let rng = new RNG(0);
+      let tile = new Uint8Array(W * H);
+      let pherO = new Float32Array(W * H);
+      let pherC = new Float32Array(W * H);
+
+      let leaves = [];
+      let spider = { x: W * 0.5, y: surfaceY, vx: 0, vy: 0, hp: 12 };
+
+      let colonies = [];
+      let paused = false;
+      let showPher = false;
+
+      // Camera in tile coordinates (top-left of view)
+      const cam = { tx: 0, ty: 0, zoom: 1.1 };
+
+      // ---------- Camera controls (consistent math) ----------
+      let dragging = false, lastX = 0, lastY = 0;
+      canvas.addEventListener("pointerdown", (e) => {
+        dragging = true;
+        lastX = e.clientX; lastY = e.clientY;
+        canvas.setPointerCapture(e.pointerId);
+      });
+      canvas.addEventListener("pointerup", () => dragging = false);
+      canvas.addEventListener("pointercancel", () => dragging = false);
+      canvas.addEventListener("pointermove", (e) => {
+        if (!dragging) return;
+        const dx = e.clientX - lastX;
+        const dy = e.clientY - lastY;
+        lastX = e.clientX; lastY = e.clientY;
+
+        const ts = TILE * cam.zoom;
+        cam.tx -= dx / ts;
+        cam.ty -= dy / ts;
+        cam.tx = clamp(cam.tx, 0, W - 1);
+        cam.ty = clamp(cam.ty, 0, H - 1);
+      });
+      canvas.addEventListener("wheel", (e) => {
+        e.preventDefault();
+        const before = cam.zoom;
+        const dir = Math.sign(e.deltaY);
+        cam.zoom = clamp(cam.zoom * (dir > 0 ? 0.92 : 1.08), 0.6, 3.0);
+
+        // Zoom around cursor
+        const mx = e.clientX, my = e.clientY;
+        const ts0 = TILE * before;
+        const ts1 = TILE * cam.zoom;
+
+        const worldX = cam.tx + mx / ts0;
+        const worldY = cam.ty + my / ts0;
+
+        cam.tx = worldX - mx / ts1;
+        cam.ty = worldY - my / ts1;
+
+        cam.tx = clamp(cam.tx, 0, W - 1);
+        cam.ty = clamp(cam.ty, 0, H - 1);
+
+        if (zoomEl) zoomEl.value = String(cam.zoom);
+      }, { passive: false });
+
+      // ---------- Entities ----------
+      class Ant {
+        constructor(col, x, y, role="WORKER") {
+          this.col = col;
+          this.x = x; this.y = y;
+          this.vx = 0; this.vy = 0;
+          this.role = role;
+          this.task = "IDLE";
+          this.target = null;
+          this.carry = null;
+          this.hp = 5;
+          this.t0 = 0;
+        }
+      }
+
+      class Colony {
+        constructor(name, color, homeX) {
+          this.name = name;
+          this.color = color;
+          this.home = { x: homeX, y: surfaceY + 10 };
+          this.entr = { x: homeX, y: surfaceY };
+          this.ants = [];
+          this.food = 8;
+          this.lastSpawn = 0;
+        }
+      }
+
+      // ---------- World building ----------
+      const carveRect = (x0, y0, x1, y1, t) => {
+        x0 = clamp(x0|0, 0, W-1); x1 = clamp(x1|0, 0, W-1);
+        y0 = clamp(y0|0, 0, H-1); y1 = clamp(y1|0, 0, H-1);
+        for (let y = y0; y <= y1; y++) {
+          const row = y * W;
+          for (let x = x0; x <= x1; x++) tile[row + x] = t;
+        }
+      };
+
+      const digLine = (x0, y0, x1, y1) => {
+        // simple Manhattan tunnel
+        let x = x0|0, y = y0|0;
+        tile[idx(x,y)] = T_TUN;
+        while (x !== (x1|0)) { x += x < x1 ? 1 : -1; tile[idx(x,y)] = T_TUN; }
+        while (y !== (y1|0)) { y += y < y1 ? 1 : -1; tile[idx(x,y)] = T_TUN; }
+      };
+
+      const scatterRocks = () => {
+        // Sparse rocks underground
+        for (let i = 0; i < 160; i++) {
+          const cx = rng.i(4, W-5);
+          const cy = rng.i(surfaceY+2, H-3);
+          const r = rng.i(1, 3);
+          for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+            if (dx*dx + dy*dy <= r*r && rng.f() < 0.8) {
+              const x = cx + dx, y = cy + dy;
+              tile[idx(x,y)] = T_ROCK;
+            }
+          }
+        }
+      };
+
+      const makeSurface = () => {
+        // Everything above surface is "air" visually, but we keep tiles as soil.
+        // Mark the surface row as tunnel so ants can walk on it.
+        for (let x = 0; x < W; x++) tile[idx(x, surfaceY)] = T_TUN;
+      };
+
+      const buildColony = (col) => {
+        // Entrance shaft plus a chamber connected to it (fixes the common "sealed room" logic bug)
+        const ex = col.entr.x|0;
+        const chX = col.home.x|0;
+        const chY = col.home.y|0;
+
+        // Shaft
+        carveRect(ex-1, surfaceY, ex+1, surfaceY+8, T_TUN);
+
+        // Connect shaft to chamber
+        digLine(ex, surfaceY+8, chX, chY);
+
+        // Chamber
+        carveRect(chX-6, chY-3, chX+6, chY+3, T_TUN);
+
+        // A little side compost nook
+        carveRect(chX+8, chY+1, chX+13, chY+4, T_TUN);
+      };
+
+      // ---------- Simulation ----------
+      let t = 0;
+      let dayClock = 0; // 0..1
+      const DAY_LEN = 60; // seconds per full day-night
+
+      const isWalkable = (x, y) => {
+        if (x < 0 || y < 0 || x >= W || y >= H) return false;
+        return tile[idx(x,y)] === T_TUN;
+      };
+
+      const addLeaf = () => {
+        const x = rng.i(2, W-3);
+        leaves.push({ x, y: surfaceY, e: 1.0 });
+      };
+
+      const nearestLeaf = (x, y, maxD=18) => {
+        let best = null, bestD = maxD*maxD;
+        for (const l of leaves) {
+          const dx = l.x - x, dy = l.y - y;
+          const d = dx*dx + dy*dy;
+          if (d < bestD) { bestD = d; best = l; }
+        }
+        return best;
+      };
+
+      const emitPher = (ant) => {
+        const x = ant.x|0, y = ant.y|0;
+        const i = idx(x,y);
+        const arr = ant.col.name === "orange" ? pherO : pherC;
+        arr[i] = clamp(arr[i] + 0.12, 0, 2.0);
+      };
+
+      const stepAnt = (ant, dt) => {
+        // Tasks: IDLE -> seek leaf on surface, pick up, return to chamber
+        emitPher(ant);
+
+        if (ant.task === "IDLE") {
+          if ((ant.y|0) >= surfaceY - 1) {
+            const l = nearestLeaf(ant.x|0, surfaceY, 22);
+            if (l) { ant.task = "GET_LEAF"; ant.target = { x: l.x, y: surfaceY, ref: l }; }
+            else ant.target = { x: ant.col.entr.x|0, y: surfaceY };
+          } else {
+            // head up sometimes
+            if (rng.f() < 0.02) ant.target = { x: ant.col.entr.x|0, y: surfaceY };
+            else ant.target = { x: ant.col.home.x|0, y: ant.col.home.y|0 };
+          }
+        }
+
+        if (ant.task === "GET_LEAF") {
+          const l = ant.target && ant.target.ref;
+          if (!l || l.e <= 0) { ant.task = "IDLE"; ant.target = null; }
+          else {
+            const dx = (l.x|0) - (ant.x|0);
+            const dy = (surfaceY) - (ant.y|0);
+            if (dx*dx + dy*dy <= 1) {
+              ant.carry = "leaf";
+              l.e = 0;
+              ant.task = "RETURN";
+              ant.target = { x: ant.col.home.x|0, y: ant.col.home.y|0 };
+              ant.col.food += 0.5;
+            } else {
+              ant.target = { x: l.x|0, y: surfaceY };
+            }
+          }
+        }
+
+        if (ant.task === "RETURN") {
+          const tx = ant.target.x|0, ty = ant.target.y|0;
+          const dx = tx - (ant.x|0), dy = ty - (ant.y|0);
+          if (dx*dx + dy*dy <= 2) {
+            ant.carry = null;
+            ant.task = "IDLE";
+            ant.target = null;
+          }
+        }
+
+        // Movement: greedy step toward target with simple collision
+        const tg = ant.target;
+        if (tg) {
+          const ax = ant.x, ay = ant.y;
+          const vx = (tg.x - ax);
+          const vy = (tg.y - ay);
+          const mag = Math.hypot(vx, vy) || 1;
+          const sp = 3.0; // tiles per second
+          const nx = ax + (vx / mag) * sp * dt;
+          const ny = ay + (vy / mag) * sp * dt;
+
+          const gx = clamp(nx|0, 0, W-1);
+          const gy = clamp(ny|0, 0, H-1);
+
+          // allow walking on surface row, else need tunnel
+          const ok = (gy === surfaceY) || isWalkable(gx, gy);
+          if (ok) { ant.x = nx; ant.y = ny; }
+          else {
+            // small random nudge to escape bumps
+            ant.x = ax + (rng.f() - 0.5) * 0.6;
+            ant.y = ay + (rng.f() - 0.5) * 0.6;
+          }
+        }
+      };
+
+      const stepSpider = (dt) => {
+        // Spider patrols surface and occasionally bites ants
+        const sx = spider.x, sy = spider.y;
+        spider.vx += (rng.f() - 0.5) * 6.0 * dt;
+        spider.vx *= 0.92;
+        spider.x = clamp(spider.x + spider.vx * dt, 2, W-3);
+        spider.y = surfaceY;
+
+        for (const col of colonies) for (const a of col.ants) {
+          if ((a.y|0) !== surfaceY) continue;
+          const dx = a.x - spider.x;
+          const d2 = dx*dx;
+          if (d2 < 2.2*2.2) {
+            a.hp -= 8 * dt;
+          }
+        }
+
+        // Remove dead ants
+        for (const col of colonies) {
+          col.ants = col.ants.filter(a => a.hp > 0);
+        }
+      };
+
+      // ---------- Rendering ----------
+      const font = "10px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+
+      const drawText = (x, y, s, color="#d7e2ff") => {
+        ctx.fillStyle = color;
+        ctx.font = font;
+        ctx.textBaseline = "top";
+        ctx.fillText(s, x, y);
+      };
+
+      const draw = () => {
+        // Background sky
+        ctx.fillStyle = "#0b1020";
+        ctx.fillRect(0, 0, vpw, vph);
+
+        // Visible bounds in tile coords
+        const ts = TILE * cam.zoom;
+        const x0 = clamp(Math.floor(cam.tx) - 2, 0, W-1);
+        const y0 = clamp(Math.floor(cam.ty) - 2, 0, H-1);
+        const x1 = clamp(Math.ceil(cam.tx + vpw / ts) + 2, 0, W-1);
+        const y1 = clamp(Math.ceil(cam.ty + vph / ts) + 2, 0, H-1);
+
+        // Helper conversions
+        const sx = (wx) => (wx - cam.tx) * ts;
+        const sy = (wy) => (wy - cam.ty) * ts;
+
+        // Draw tiles
+        for (let y = y0; y <= y1; y++) {
+          for (let x = x0; x <= x1; x++) {
+            const i = idx(x,y);
+            const t0 = tile[i];
+
+            // Air above surface: draw only faint grid
+            if (y < surfaceY) {
+              if ((x + y) % 11 === 0) {
+                ctx.fillStyle = "rgba(255,255,255,0.04)";
+                ctx.fillRect(sx(x), sy(y), ts, ts);
+              }
+              continue;
+            }
+
+            if (y === surfaceY) {
+              ctx.fillStyle = "#2a6f4c";
+              ctx.fillRect(sx(x), sy(y), ts, ts);
+              ctx.fillStyle = "rgba(255,255,255,0.06)";
+              ctx.fillRect(sx(x), sy(y), ts, 1);
+              continue;
+            }
+
+            if (t0 === T_SOIL) ctx.fillStyle = "#2a1b10";
+            else if (t0 === T_TUN) ctx.fillStyle = "#3a2a1b";
+            else ctx.fillStyle = "#2f3342";
+
+            ctx.fillRect(sx(x), sy(y), ts, ts);
+
+            // Rock speckle
+            if (t0 === T_ROCK && rng.f() < 0.08) {
+              ctx.fillStyle = "rgba(255,255,255,0.06)";
+              ctx.fillRect(sx(x) + ts*0.3, sy(y) + ts*0.3, 1, 1);
+            }
+          }
+        }
+
+        // Leaves
+        for (const l of leaves) {
+          if (l.e <= 0) continue;
+          drawText(sx(l.x) + 1, sy(l.y) - 2, "🍂", "#d4a373");
+        }
+
+        // Pheromone overlay
+        if (showPher) {
+          for (let y = y0; y <= Math.min(y1, surfaceY + 14); y++) {
+            for (let x = x0; x <= x1; x++) {
+              const i = idx(x,y);
+              const o = pherO[i];
+              const c = pherC[i];
+              const a = clamp(Math.max(o, c) * 0.12, 0, 0.35);
+              if (a <= 0.01) continue;
+              ctx.fillStyle = (o >= c) ? `rgba(255,140,80,${a})` : `rgba(80,220,255,${a})`;
+              ctx.fillRect(sx(x), sy(y), ts, ts);
+            }
+          }
+        }
+
+        // Ants
+        for (const col of colonies) {
+          for (const a of col.ants) {
+            const ch = (a.carry === "leaf") ? "A*" : "A";
+            drawText(sx(a.x) + 1, sy(a.y) + 1, ch, col.color);
+          }
+        }
+
+        // Spider
+        drawText(sx(spider.x) + 1, sy(spider.y) + 1, "S", "#ff5c7a");
+
+        // UI hint
+        drawText(12, 48, "drag to pan, wheel to zoom", "rgba(215,226,255,0.65)");
+      };
+
+      // ---------- Tick scheduling (cheaper than doing everything every frame) ----------
+      let acc = 0;
+      let lastMs = 0;
+      let simSpeed = 1.0;
+      let lastField = 0;
+
+      const updateHUD = () => {
+        if (chipTime) chipTime.textContent = `time: ${t.toFixed(1)}`;
+        const phase = dayClock < 0.5 ? "day" : "night";
+        if (chipPhase) chipPhase.textContent = `phase: ${phase}`;
+        if (chipO) chipO.textContent = `orange: ${colonies[0]?.ants.length || 0} ants, food ${(colonies[0]?.food || 0).toFixed(1)}`;
+        if (chipC) chipC.textContent = `cyan: ${colonies[1]?.ants.length || 0} ants, food ${(colonies[1]?.food || 0).toFixed(1)}`;
+        const liveLeaves = leaves.reduce((n,l) => n + (l.e > 0 ? 1 : 0), 0);
+        if (chipSurf) chipSurf.textContent = `surface: ${liveLeaves} leaves`;
+      };
+
+      const resetWorld = () => {
+        const seedStr = (seedEl && seedEl.value || "").trim();
+        let seed = 0;
+        if (seedStr) {
+          // simple hash
+          for (let i = 0; i < seedStr.length; i++) seed = ((seed * 131) + seedStr.charCodeAt(i)) >>> 0;
+        } else {
+          seed = (Math.random() * 0xFFFFFFFF) >>> 0;
+        }
+        rng = new RNG(seed);
+
+        tile = new Uint8Array(W * H);
+        pherO = new Float32Array(W * H);
+        pherC = new Float32Array(W * H);
+        leaves = [];
+        colonies = [];
+
+        makeSurface();
+        scatterRocks();
+
+        const orange = new Colony("orange", "#ffb16b", Math.floor(W * 0.35));
+        const cyan = new Colony("cyan", "#7ae7ff", Math.floor(W * 0.65));
+        colonies.push(orange, cyan);
+
+        buildColony(orange);
+        buildColony(cyan);
+
+        orange.ants.push(new Ant(orange, orange.home.x, orange.home.y));
+        cyan.ants.push(new Ant(cyan, cyan.home.x, cyan.home.y));
+
+        spider = { x: W * 0.5, y: surfaceY, vx: 0, vy: 0, hp: 12 };
+
+        cam.zoom = parseFloat(zoomEl?.value || "1.1");
+        cam.tx = clamp(orange.entr.x - (vpw / (TILE * cam.zoom)) * 0.5, 0, W-1);
+        cam.ty = clamp(surfaceY - 10, 0, H-1);
+
+        t = 0;
+        dayClock = 0;
+        acc = 0;
+        lastField = 0;
+        updateHUD();
+      };
+
+      const tick = (dt) => {
+        // day-night
+        dayClock = (dayClock + dt / DAY_LEN) % 1;
+
+        // leaf spawning: more in day, less at night
+        const leafRate = (dayClock < 0.5) ? 0.55 : 0.22; // leaves per second (expected)
+        if (rng.f() < leafRate * dt) addLeaf();
+
+        // decay leaves
+        for (const l of leaves) if (l.e > 0) l.e = Math.max(0, l.e - dt * 0.03);
+        // prune
+        if (leaves.length > 220) leaves = leaves.filter(l => l.e > 0);
+
+        // pheromone decay (cheap)
+        const decay = Math.pow(0.2, dt / 8); // half-life-ish
+        for (let i = 0; i < pherO.length; i++) {
+          pherO[i] *= decay;
+          pherC[i] *= decay;
+        }
+
+        // ants
+        for (const col of colonies) {
+          // spawn new ants if enough food
+          if (col.food > 12 && (t - col.lastSpawn) > 3.5 && col.ants.length < 60) {
+            col.food -= 3.0;
+            col.lastSpawn = t;
+            col.ants.push(new Ant(col, col.home.x + rng.i(-2,2), col.home.y + rng.i(-1,1)));
+          }
+          for (const a of col.ants) stepAnt(a, dt);
+        }
+
+        // spider only hunts at night a bit more
+        const spiderBoost = (dayClock >= 0.5) ? 1.25 : 1.0;
+        stepSpider(dt * spiderBoost);
+
+        // periodic HUD
+        if ((t|0) !== ((t - dt)|0)) updateHUD();
+      };
+
+      const frame = (ms) => {
+        try {
+          if (!lastMs) lastMs = ms;
+          const rawDt = Math.min(0.05, (ms - lastMs) / 1000);
+          lastMs = ms;
+
+          simSpeed = parseFloat(speedEl?.value || "1.0");
+          const dt = paused ? 0 : rawDt * simSpeed;
+          t += dt;
+
+          // fixed step-ish accumulator
+          acc += dt;
+          const step = 1 / 60; // 60 Hz sim step
+          let steps = 0;
+          while (acc >= step && steps < 6) {
+            tick(step);
+            acc -= step;
+            steps++;
+          }
+
+          draw();
+          requestAnimationFrame(frame);
+        } catch (e) {
+          fatal(e);
+        }
+      };
+
+      // ---------- UI wiring ----------
+      menuBtn?.addEventListener("click", () => panel?.classList.toggle("open"));
+      pauseBtn?.addEventListener("click", () => {
+        paused = !paused;
+        pauseBtn.textContent = paused ? "Paused" : "Running";
+      });
+      resetBtn?.addEventListener("click", resetWorld);
+      zoomEl?.addEventListener("input", () => { cam.zoom = parseFloat(zoomEl.value); });
+      pherBtn?.addEventListener("click", () => {
+        showPher = !showPher;
+        pherBtn.textContent = showPher ? "On" : "Off";
+      });
+
+      // ---------- Go ----------
+      resetWorld();
+      requestAnimationFrame(frame);
+
+    } catch (e) {
+      fatal(e);
+    }
+  });
+})();
+</script>
+</body>
+</html>
