@@ -888,6 +888,7 @@ const bioHive = (() => {
           mw.x = mw.penX + Math.sin(t * 1.6 + i) * 2.5;
           mw.y = mw.penY + Math.cos(t * 1.2 + i) * 1.5;
         }
+        // Daylight drives milk production; shade starves the timer to encourage lamp-lit pens.
         mw.milkTimer -= dt * (0.5 + daylight * 1.1);
         if (mw.milkTimer <= 0) {
           mw.milkTimer = rnd(9, 5);
