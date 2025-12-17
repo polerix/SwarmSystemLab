@@ -1,35 +1,229 @@
-I can’t help you *clone* that exact game (same code, assets, and behavior) without the creator’s permission. That’s basically a copyright speedrun.
-
-But I **can** help you build a **from-scratch HTML5 game in the same “hive sim” spirit** (original code + placeholder art), and you can tune it until it matches the feel you want. Also: the page you linked is password-gated, so I can’t view its details from here. ([itch.io][1])
-
-Here’s a **playable single-file prototype** (top-down, capture hosts, drag to nest, turn into biomass, lay “resin” that must stay connected to the nest, eggs hatch into drones that also capture). Save this as `index.html` and open it.
-
-```html
 <!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>BioHive (original HTML5 prototype)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="Alien Ant Farm's BioHive prototype. Command the swarm directly in the browser." />
+  <meta name="theme-color" content="#050b0f" />
+  <title>Alien Ant Farm | BioHive Prototype</title>
+  <link rel="icon" href="Ant.png" type="image/png" />
   <style>
-    html, body { margin: 0; height: 100%; background:#0b0f10; overflow:hidden; }
-    canvas { display:block; width:100vw; height:100vh; image-rendering: pixelated; }
-    .hud {
-      position: fixed; left: 10px; top: 10px; color: #d7f7ff; font: 13px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      background: rgba(0,0,0,0.45); border: 1px solid rgba(215,247,255,0.18);
-      padding: 10px 12px; border-radius: 10px; max-width: 520px;
+    :root {
+      color-scheme: dark;
+      --bg: #03070a;
+      --panel-bg: rgba(4, 9, 12, 0.78);
+      --panel-border: rgba(215, 247, 255, 0.22);
+      --text: #def6ff;
+      --muted: rgba(222, 246, 255, 0.75);
+      --accent: #7dffe1;
+      font-family: 'Space Grotesk', 'Inter', 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
     }
-    .hud b { color:#ffffff; }
-    .hint { color: rgba(215,247,255,0.75); }
-    .warn { color: #ffd27a; }
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+      overflow: hidden;
+    }
+    canvas {
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      height: 100vh;
+      display: block;
+      image-rendering: pixelated;
+      background: #050b0f;
+      z-index: 0;
+    }
+    .site-header {
+      position: fixed;
+      left: clamp(12px, 2vw, 42px);
+      top: clamp(10px, 2vw, 32px);
+      z-index: 3;
+      padding: 18px 22px;
+      border-radius: 18px;
+      border: 1px solid var(--panel-border);
+      background: var(--panel-bg);
+      backdrop-filter: blur(18px);
+      width: min(420px, calc(100vw - 24px));
+    }
+    .site-title {
+      margin: 0 0 14px;
+    }
+    .site-title h1 {
+      margin: 4px 0 0;
+      font-size: clamp(1.4rem, 2vw, 1.8rem);
+    }
+    .eyebrow {
+      text-transform: uppercase;
+      letter-spacing: 0.2em;
+      font-size: 0.65rem;
+      color: var(--muted);
+      margin: 0;
+    }
+    .header-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .btn {
+      border: 1px solid transparent;
+      background: var(--accent);
+      color: #021512;
+      font-weight: 600;
+      padding: 8px 16px;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: transform 150ms ease, box-shadow 150ms ease;
+    }
+    .btn:active { transform: translateY(1px); }
+    .ghost-link {
+      color: var(--text);
+      text-decoration: none;
+      border-bottom: 1px solid rgba(125, 255, 225, 0.4);
+      padding-bottom: 2px;
+      align-self: flex-end;
+      font-size: 0.9rem;
+    }
+    .ui-stack {
+      position: fixed;
+      left: clamp(12px, 2vw, 42px);
+      top: clamp(152px, 16vh, 200px);
+      width: min(400px, calc(100vw - 24px));
+      max-height: calc(100vh - 220px);
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      padding-right: 6px;
+      z-index: 2;
+    }
+    .panel {
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      border-radius: 18px;
+      padding: 18px 20px;
+      backdrop-filter: blur(16px);
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.35);
+    }
+    .panel--alt { border-style: dashed; }
+    .panel__title {
+      margin: 0 0 8px;
+      font-size: 1.05rem;
+    }
+    .panel__hint {
+      margin: 12px 0 0;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+    .hud {
+      font: 0.9rem/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      color: var(--text);
+      min-height: 72px;
+    }
+    .keymap {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 0.95rem;
+    }
+    .keymap li {
+      display: flex;
+      justify-content: space-between;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      padding: 4px 0;
+    }
+    .site-footer {
+      position: fixed;
+      left: clamp(12px, 2vw, 42px);
+      bottom: clamp(12px, 2vw, 32px);
+      z-index: 3;
+      color: var(--muted);
+      font-size: 0.85rem;
+      max-width: min(420px, calc(100vw - 24px));
+    }
+    .noscript {
+      position: fixed;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      background: rgba(0, 0, 0, 0.9);
+      z-index: 4;
+      font-size: 1.1rem;
+    }
+    @media (max-width: 720px) {
+      body { overflow-y: auto; }
+      canvas { position: fixed; }
+      .site-header,
+      .ui-stack,
+      .site-footer {
+        position: relative;
+        width: auto;
+        left: auto;
+        right: auto;
+        top: auto;
+        bottom: auto;
+        margin: 12px auto;
+      }
+      .ui-stack { max-height: none; }
+      .site-footer { text-align: center; }
+    }
   </style>
 </head>
 <body>
-<canvas id="c"></canvas>
-<div class="hud" id="hud"></div>
+  <canvas id="game-canvas" aria-hidden="true"></canvas>
+  <header class="site-header">
+    <div class="site-title">
+      <p class="eyebrow">Alien Ant Farm</p>
+      <h1>BioHive Prototype</h1>
+      <p class="subtitle">Self-contained HTML5 build ready for GitHub Pages hosting.</p>
+    </div>
+    <div class="header-actions">
+      <button class="btn" type="button" id="reset-run">Reset Run</button>
+      <a class="ghost-link" href="https://github.com/polerixsys/AlienAntFarm" target="_blank" rel="noopener">View repository</a>
+    </div>
+  </header>
+  <main class="ui-stack" aria-label="Interface overlays">
+    <section class="panel">
+      <h2 class="panel__title">Mission Feed</h2>
+      <div class="hud" id="hud-panel" role="status" aria-live="polite">
+        <p>Booting BioHive...</p>
+      </div>
+    </section>
+    <section class="panel" id="how-to-play">
+      <h2 class="panel__title">How to Play</h2>
+      <ul class="keymap">
+        <li><span>WASD / Arrows</span><span>Move</span></li>
+        <li><span>E key</span><span>Pick up / drop creature</span></li>
+        <li><span>Space</span><span>Drop carried creature</span></li>
+        <li><span>Right click</span><span>Place resin</span></li>
+        <li><span>R key</span><span>Reset simulation</span></li>
+        <li><span>Escort mealworms</span><span>Pen them on resin</span></li>
+      </ul>
+      <p class="panel__hint">Keep the resin chain connected to the nest or it will decay.</p>
+    </section>
+    <section class="panel panel--alt" id="about">
+      <h2 class="panel__title">About this Build</h2>
+      <p>Everything runs locally in the browser &mdash; perfect for GitHub Pages or any static host.</p>
+      <p>Mealworms now roam the map: escort them onto connected resin to set up illuminated pens that drip biomass-rich milk. Drones will pitch in automatically once host targets are scarce.</p>
+      <p class="panel__hint">All audio/visual assets here are placeholders so you can reskin freely.</p>
+    </section>
+  </main>
+  <footer class="site-footer">
+    <p>&copy; <span id="year"></span> Alien Ant Farm. Deploy the swarm anywhere static HTML is supported.</p>
+  </footer>
+  <noscript class="noscript">Enable JavaScript to command the colony.</noscript>
+  <script type="module">
+const yearLabel = document.getElementById('year');
+if (yearLabel) yearLabel.textContent = new Date().getFullYear();
 
-<script>
-(() => {
+const bioHive = (() => {
   // ----------------------------
   // BioHive: original prototype
   // ----------------------------
@@ -43,8 +237,11 @@ Here’s a **playable single-file prototype** (top-down, capture hosts, drag to 
   // Goal:
   //  - Keep the hive connected, harvest biomass, survive patrol spawns.
 
-  const canvas = document.getElementById('c');
-  const hudEl = document.getElementById('hud');
+  const canvas = document.getElementById('game-canvas');
+  const hudEl = document.getElementById('hud-panel');
+  if (!canvas || !hudEl) {
+    throw new Error('BioHive UI elements are missing from the document.');
+  }
   const ctx = canvas.getContext('2d', { alpha: false });
 
   const DPR = Math.max(1, Math.min(2, devicePixelRatio || 1));
@@ -87,10 +284,13 @@ Here’s a **playable single-file prototype** (top-down, capture hosts, drag to 
 
   let biomass = 8;
   let eggs = [];     // {x,y, hatchAt}
-  let drones = [];   // {x,y, vx,vy, carryId:null|hostIndex}
+  let drones = [];   // {x,y, vx,vy, carryHostId:null|number, carryMealwormId:null|number}
   let hosts = [];    // {x,y, vx,vy, alive, grabbedBy:null|('player'|'drone:'+i)}
+  let mealworms = []; // {x,y,vx,vy, captured:boolean, penX,penY, grabbedBy:null|'player'|'drone:k', milkTimer, alive}
   let marines = [];  // {x,y, vx,vy, shootCd}
   let kills = 0;
+  let mealwormMilk = 0;
+  let daylightLevel = 0;
 
   // Nest is a small connected resin patch at start
   const nest = { x: Math.floor(W/2), y: Math.floor(H/2), r: 3 };
@@ -130,6 +330,8 @@ Here’s a **playable single-file prototype** (top-down, capture hosts, drag to 
   // Init / reset
   function init() {
     t = 0; biomass = 8; eggs = []; drones = []; hosts = []; marines = []; kills = 0;
+    mealworms = [];
+    mealwormMilk = 0;
     grid = new Uint8Array(W*H);
     resinAge = new Float32Array(W*H);
     connected = new Uint8Array(W*H);
@@ -169,6 +371,24 @@ Here’s a **playable single-file prototype** (top-down, capture hosts, drag to 
         y: (p.y+0.5)*TILE,
         vx: rnd(28,-28),
         vy: rnd(28,-28),
+        alive: true,
+        grabbedBy: null
+      });
+    }
+
+    // Mealworms roaming surface in search of light
+    const mealwormCount = 10;
+    for (let i=0; i<mealwormCount; i++) {
+      const p = randomOpenTileFarFromNest(10);
+      mealworms.push({
+        x: (p.x+0.5)*TILE,
+        y: (p.y+0.5)*TILE,
+        vx: rnd(18,-18),
+        vy: rnd(18,-18),
+        captured: false,
+        penX: null,
+        penY: null,
+        milkTimer: rnd(9, 5),
         alive: true,
         grabbedBy: null
       });
@@ -264,10 +484,11 @@ Here’s a **playable single-file prototype** (top-down, capture hosts, drag to 
     }
   }
 
-  function tryPickupOrDrop() {
-    // If carrying, drop
-    if (player.carrying !== null) {
-      const h = hosts[player.carrying];
+  function dropCarriedEntityAtPlayer() {
+    if (!player.carrying) return;
+    const payload = player.carrying;
+    if (payload.type === 'host') {
+      const h = hosts[payload.id];
       if (h && h.alive) {
         h.grabbedBy = null;
         h.x = player.x + rnd(10,-10);
@@ -275,7 +496,26 @@ Here’s a **playable single-file prototype** (top-down, capture hosts, drag to 
         h.vx = player.vx * 0.2;
         h.vy = player.vy * 0.2;
       }
-      player.carrying = null;
+    } else if (payload.type === 'mealworm') {
+      const mw = mealworms[payload.id];
+      if (mw && mw.alive) {
+        mw.grabbedBy = null;
+        mw.captured = false;
+        mw.penX = null;
+        mw.penY = null;
+        mw.x = player.x + rnd(8,-8);
+        mw.y = player.y + rnd(8,-8);
+        mw.vx = player.vx * 0.1;
+        mw.vy = player.vy * 0.1;
+      }
+    }
+    player.carrying = null;
+  }
+
+  function tryPickupOrDrop() {
+    // If carrying, drop
+    if (player.carrying !== null) {
+      dropCarriedEntityAtPlayer();
       return;
     }
 
@@ -289,8 +529,19 @@ Here’s a **playable single-file prototype** (top-down, capture hosts, drag to 
       if (d2 < bestD2 && d2 < (28*28)) { bestD2 = d2; best = i; }
     }
     if (best !== -1) {
-      player.carrying = best;
+      player.carrying = { type:'host', id: best };
       hosts[best].grabbedBy = 'player';
+      return;
+    }
+
+    const mwId = nearestMealworm(player.x, player.y, 32, { onlyFree: true });
+    if (mwId !== -1) {
+      const mw = mealworms[mwId];
+      player.carrying = { type:'mealworm', id: mwId };
+      mw.grabbedBy = 'player';
+      mw.captured = false;
+      mw.penX = null;
+      mw.penY = null;
     }
   }
 
@@ -337,7 +588,7 @@ Here’s a **playable single-file prototype** (top-down, capture hosts, drag to 
 
   function hatchEgg(i) {
     const e = eggs[i];
-    drones.push({ x:e.x, y:e.y, vx:0, vy:0, carryId: null });
+    drones.push({ x:e.x, y:e.y, vx:0, vy:0, carryHostId: null, carryMealwormId: null });
     eggs.splice(i,1);
   }
 
@@ -366,6 +617,22 @@ Here’s a **playable single-file prototype** (top-down, capture hosts, drag to 
       const dx=h.x-x, dy=h.y-y;
       const d2=dx*dx+dy*dy;
       if (d2<bestD2){ bestD2=d2; best=i; }
+    }
+    return best;
+  }
+
+  function nearestMealworm(x,y,radius=Infinity,{onlyFree=true}={}) {
+    let best=-1, bestD2=radius*radius;
+    for (let i=0;i<mealworms.length;i++){
+      const mw = mealworms[i];
+      if (!mw.alive) continue;
+      if (onlyFree && (mw.captured || mw.grabbedBy)) continue;
+      const dx = mw.x - x, dy = mw.y - y;
+      const d2 = dx*dx + dy*dy;
+      if (d2 < bestD2) {
+        bestD2 = d2;
+        best = i;
+      }
     }
     return best;
   }
@@ -411,12 +678,21 @@ Here’s a **playable single-file prototype** (top-down, capture hosts, drag to 
     clampToWorld(player);
 
     // Carry follows player
-    if (player.carrying !== null) {
-      const h = hosts[player.carrying];
+    if (player.carrying?.type === 'host') {
+      const h = hosts[player.carrying.id];
       if (h && h.alive) {
         h.x = player.x + rnd(8,-8);
         h.y = player.y + rnd(8,-8);
         h.vx = 0; h.vy = 0;
+      } else {
+        player.carrying = null;
+      }
+    } else if (player.carrying?.type === 'mealworm') {
+      const mw = mealworms[player.carrying.id];
+      if (mw && mw.alive) {
+        mw.x = player.x + rnd(6,-6);
+        mw.y = player.y + rnd(6,-6);
+        mw.vx = 0; mw.vy = 0;
       } else {
         player.carrying = null;
       }
@@ -425,14 +701,7 @@ Here’s a **playable single-file prototype** (top-down, capture hosts, drag to 
     // Drop carried host instantly with Space (same as E drop but without toggling pickup)
     if (keys.has(' ')) {
       if (player.carrying !== null) {
-        const id = player.carrying;
-        const h = hosts[id];
-        if (h && h.alive) {
-          h.grabbedBy = null;
-          h.x = player.x; h.y = player.y;
-          h.vx = 0; h.vy = 0;
-        }
-        player.carrying = null;
+        dropCarriedEntityAtPlayer();
         keys.delete(' ');
       }
     }
@@ -462,6 +731,9 @@ Here’s a **playable single-file prototype** (top-down, capture hosts, drag to 
     // If player brings a host to nest resin, process it
     processDropOff('player', player.x, player.y, player.carrying);
 
+    daylightLevel = 0.5 + 0.5 * Math.sin(t / 18);
+    updateMealworms(daylightLevel);
+
     // Eggs hatch
     for (let i=eggs.length-1; i>=0; i--) {
       if (t >= eggs[i].hatchAt) hatchEgg(i);
@@ -474,36 +746,66 @@ Here’s a **playable single-file prototype** (top-down, capture hosts, drag to 
       let targetX = d.x, targetY = d.y;
       let desiredSpeed = 170;
 
-      if (d.carryId === null) {
+      if (d.carryHostId === null && d.carryMealwormId === null) {
         const hi = nearestHost(d.x, d.y);
         if (hi !== -1) {
           const h = hosts[hi];
           const dx=h.x-d.x, dy=h.y-d.y;
           const dist = Math.hypot(dx,dy);
           if (dist < 18) {
-            d.carryId = hi;
+            d.carryHostId = hi;
             h.grabbedBy = 'drone:' + i;
           } else {
             targetX = h.x; targetY = h.y;
           }
         } else {
-          // idle near nest
-          targetX = (nest.x+0.5)*TILE + Math.sin(t*0.8 + i)*60;
-          targetY = (nest.y+0.5)*TILE + Math.cos(t*0.7 + i)*60;
+          const mi = nearestMealworm(d.x, d.y, 360, { onlyFree: true });
+          if (mi !== -1) {
+            const mw = mealworms[mi];
+            const dx=mw.x-d.x, dy=mw.y-d.y;
+            const dist = Math.hypot(dx,dy);
+            if (dist < 18) {
+              d.carryMealwormId = mi;
+              mw.grabbedBy = 'drone:' + i;
+              mw.captured = false;
+              mw.penX = null;
+              mw.penY = null;
+            } else {
+              targetX = mw.x; targetY = mw.y;
+              desiredSpeed = 150;
+            }
+          } else {
+            // idle near nest
+            targetX = (nest.x+0.5)*TILE + Math.sin(t*0.8 + i)*60;
+            targetY = (nest.y+0.5)*TILE + Math.cos(t*0.7 + i)*60;
+          }
         }
-      } else {
+      } else if (d.carryHostId !== null) {
         // Carrying: return to nest
         targetX = (nest.x+0.5)*TILE;
         targetY = (nest.y+0.5)*TILE;
         desiredSpeed = 150;
 
-        const h = hosts[d.carryId];
+        const h = hosts[d.carryHostId];
         if (h && h.alive) {
           h.x = d.x + rnd(7,-7);
           h.y = d.y + rnd(7,-7);
           h.vx = 0; h.vy = 0;
         } else {
-          d.carryId = null;
+          d.carryHostId = null;
+        }
+      } else if (d.carryMealwormId !== null) {
+        targetX = (nest.x+0.5)*TILE;
+        targetY = (nest.y+0.5)*TILE;
+        desiredSpeed = 145;
+
+        const mw = mealworms[d.carryMealwormId];
+        if (mw && mw.alive) {
+          mw.x = d.x + rnd(5,-5);
+          mw.y = d.y + rnd(5,-5);
+          mw.vx = 0; mw.vy = 0;
+        } else {
+          d.carryMealwormId = null;
         }
       }
 
@@ -518,7 +820,11 @@ Here’s a **playable single-file prototype** (top-down, capture hosts, drag to 
       clampToWorld(d);
 
       // Drone drop-off processing
-      if (d.carryId !== null) processDropOff('drone', d.x, d.y, d.carryId, i);
+      if (d.carryHostId !== null) {
+        processDropOff('drone', d.x, d.y, { type:'host', id: d.carryHostId }, i);
+      } else if (d.carryMealwormId !== null) {
+        processDropOff('drone', d.x, d.y, { type:'mealworm', id: d.carryMealwormId }, i);
+      }
     }
 
     // Marines spawn and hunt drones
@@ -551,16 +857,61 @@ Here’s a **playable single-file prototype** (top-down, capture hosts, drag to 
         if (d2 < 220*220 && m.shootCd <= 0) {
           // remove drone
           // If it was carrying, release host
-          if (d.carryId !== null) {
-            const h = hosts[d.carryId];
+          if (d.carryHostId !== null) {
+            const h = hosts[d.carryHostId];
             if (h && h.alive) h.grabbedBy = null;
+          }
+          if (d.carryMealwormId !== null) {
+            const mw = mealworms[d.carryMealwormId];
+            if (mw && mw.alive) {
+              mw.grabbedBy = null;
+              mw.captured = false;
+              mw.penX = null;
+              mw.penY = null;
+            }
           }
           drones.splice(di,1);
           kills++;
           m.shootCd = 0.75;
-        }
       }
     }
+  }
+
+  function updateMealworms(daylight) {
+    for (let i=0; i<mealworms.length; i++){
+      const mw = mealworms[i];
+      if (!mw.alive) continue;
+      if (mw.grabbedBy) continue;
+
+      if (mw.captured) {
+        if (mw.penX !== null && mw.penY !== null) {
+          mw.x = mw.penX + Math.sin(t * 1.6 + i) * 2.5;
+          mw.y = mw.penY + Math.cos(t * 1.2 + i) * 1.5;
+        }
+        mw.milkTimer -= dt * (0.5 + daylight * 1.1);
+        if (mw.milkTimer <= 0) {
+          mw.milkTimer = rnd(9, 5);
+          const milkYield = daylight > 0.65 ? 1.4 : 0.9;
+          biomass += milkYield;
+          mealwormMilk += milkYield;
+        }
+        continue;
+      }
+
+      if (Math.random() < 0.05) {
+        mw.vx += rnd(20,-20);
+        mw.vy += rnd(20,-20);
+      }
+      const s = 40;
+      const vlen = Math.hypot(mw.vx,mw.vy) || 1;
+      mw.vx = (mw.vx/vlen)*Math.min(vlen,s);
+      mw.vy = (mw.vy/vlen)*Math.min(vlen,s);
+
+      mw.x += mw.vx * dt;
+      mw.y += mw.vy * dt;
+      clampToWorld(mw);
+    }
+  }
 
     // Resin decay if disconnected
     // Also gradually age all resin tiles
@@ -612,10 +963,8 @@ Here’s a **playable single-file prototype** (top-down, capture hosts, drag to 
     return best;
   }
 
-  function processDropOff(by, x, y, hostId, droneIndex=null) {
-    if (hostId === null || hostId === undefined) return;
-    const h = hosts[hostId];
-    if (!h || !h.alive) return;
+  function processDropOff(by, x, y, payload, droneIndex=null) {
+    if (!payload) return;
 
     // Must be on connected resin near nest
     const tx = Math.floor(x / TILE), ty = Math.floor(y / TILE);
@@ -628,22 +977,48 @@ Here’s a **playable single-file prototype** (top-down, capture hosts, drag to 
     const dx = x - nx, dy = y - ny;
     if (dx*dx + dy*dy > (120*120)) return;
 
-    // Convert host to biomass, possibly spawn egg if enough biomass
-    h.alive = false;
-    h.grabbedBy = null;
+    if (payload.type === 'host') {
+      const h = hosts[payload.id];
+      if (!h || !h.alive) return;
 
-    biomass += HOST_VALUE;
+      // Convert host to biomass, possibly spawn egg if enough biomass
+      h.alive = false;
+      h.grabbedBy = null;
 
-    if (biomass >= EGG_COST) {
-      biomass -= EGG_COST;
-      spawnEggAtNest();
-    }
+      biomass += HOST_VALUE;
 
-    // Clear carrier reference
-    if (by === 'player') player.carrying = null;
-    if (by === 'drone' && droneIndex !== null) {
-      const d = drones[droneIndex];
-      if (d) d.carryId = null;
+      if (biomass >= EGG_COST) {
+        biomass -= EGG_COST;
+        spawnEggAtNest();
+      }
+
+      // Clear carrier reference
+      if (by === 'player') player.carrying = null;
+      if (by === 'drone' && droneIndex !== null) {
+        const d = drones[droneIndex];
+        if (d) d.carryHostId = null;
+      }
+    } else if (payload.type === 'mealworm') {
+      const mw = mealworms[payload.id];
+      if (!mw || !mw.alive || mw.captured) return;
+      mw.captured = true;
+      mw.grabbedBy = null;
+      mw.penX = (tx+0.5)*TILE;
+      mw.penY = (ty+0.5)*TILE;
+      mw.vx = 0;
+      mw.vy = 0;
+      mw.milkTimer = rnd(9, 5);
+
+      const captureYield = daylightLevel > 0.65 ? 1.2 : 0.8;
+      biomass += captureYield;
+      mealwormMilk += captureYield;
+
+      if (by === 'player') {
+        player.carrying = null;
+      } else if (by === 'drone' && droneIndex !== null) {
+        const d = drones[droneIndex];
+        if (d) d.carryMealwormId = null;
+      }
     }
   }
 
@@ -719,6 +1094,21 @@ Here’s a **playable single-file prototype** (top-down, capture hosts, drag to 
       ctx.stroke();
     }
 
+    // Mealworms
+    for (const mw of mealworms) {
+      if (!mw.alive) continue;
+      ctx.fillStyle = mw.captured ? '#ffe0a4' : '#ffb374';
+      ctx.beginPath();
+      ctx.ellipse(mw.x, mw.y, 5.5, 4.2, 0, 0, Math.PI*2);
+      ctx.fill();
+      if (mw.captured) {
+        ctx.strokeStyle = 'rgba(255,224,164,0.55)';
+        ctx.beginPath();
+        ctx.arc(mw.x, mw.y, 8, 0, Math.PI*2);
+        ctx.stroke();
+      }
+    }
+
     // Drones
     for (const d of drones) {
       ctx.fillStyle = '#7dffe1';
@@ -726,7 +1116,7 @@ Here’s a **playable single-file prototype** (top-down, capture hosts, drag to 
       ctx.arc(d.x, d.y, 7.5, 0, Math.PI*2);
       ctx.fill();
 
-      if (d.carryId !== null) {
+      if (d.carryHostId !== null || d.carryMealwormId !== null) {
         ctx.strokeStyle = 'rgba(125,255,225,0.35)';
         ctx.beginPath();
         ctx.arc(d.x, d.y, 13, 0, Math.PI*2);
@@ -779,11 +1169,16 @@ Here’s a **playable single-file prototype** (top-down, capture hosts, drag to 
     const connCount = countConnectedResin();
     const connPct = resinCount ? Math.round((connCount/resinCount)*100) : 0;
     const aliveHosts = hosts.reduce((a,h)=>a+(h.alive?1:0),0);
+    const totalMealworms = mealworms.reduce((a,m)=>a+(m.alive?1:0),0);
+    const capturedMealworms = mealworms.reduce((a,m)=>a+((m.alive && m.captured)?1:0),0);
+    const daylightPct = Math.round(daylightLevel * 100);
+    const milkStat = mealwormMilk.toFixed(1);
 
     hudEl.innerHTML =
       `<b>BioHive</b> (original prototype)<br>` +
       `Biomass: <b>${biomass}</b> &nbsp; Drones: <b>${drones.length}</b> &nbsp; Eggs: <b>${eggs.length}</b> &nbsp; Hosts left: <b>${aliveHosts}</b><br>` +
       `Resin: <b>${connCount}</b> connected / <b>${resinCount}</b> total (<b>${connPct}%</b>) &nbsp; Patrol losses: <b>${kills}</b><br>` +
+      `Mealworms penned: <b>${capturedMealworms}</b> / <b>${totalMealworms}</b> &nbsp; Milk yield: <b>${milkStat}</b> &nbsp; Daylight: <b>${daylightPct}%</b><br>` +
       `<span class="hint">WASD move, E pick/drop, Space drop, Right click place resin (cost ${RESIN_COST}), R reset</span><br>` +
       `<span class="warn">Tip: disconnected resin decays. Build outward in a single connected network.</span>`;
   }
@@ -813,12 +1208,14 @@ Here’s a **playable single-file prototype** (top-down, capture hosts, drag to 
   // Start
   init();
   requestAnimationFrame(update);
+
+  return { reset: init };
 })();
-</script>
+const resetButton = document.getElementById('reset-run');
+if (resetButton) {
+  resetButton.addEventListener('click', () => bioHive.reset());
+}
+
+  </script>
 </body>
 </html>
-```
-
-If you tell me (in your own words) the **3 to 6 core mechanics** in the itch build (camera style, how hive grows, what “win/lose” is, any special units), I can reshape this into a much closer “same vibe, different DNA” version while still staying on the right side of ownership.
-
-[1]: https://gfx47.itch.io/xenohive "Xeno Hive by GFX47 - itch.io"
