@@ -51,7 +51,7 @@
     /* Status bar */
     #status{
       position:fixed; left:0; right:0; top:0;
-      padding:6px 10px;
+      padding:18px 34px 10px 10px;
       background:linear-gradient(to bottom, rgba(12,16,32,0.92), rgba(12,16,32,0.65));
       color:var(--text);
       font-size:12px;
@@ -73,9 +73,14 @@
     .warn{color:#ffcc66}
 
     /* Menu */
-    #menuBtn{
+    #menuLauncher{
       position:fixed; left:8px; top:58px;
       z-index:11;
+      display:flex;
+      gap:8px;
+      align-items:center;
+    }
+    #menuBtn{
       padding:6px 10px;
       border:1px solid rgba(160,180,255,0.25);
       background:rgba(10,13,23,0.86);
@@ -141,6 +146,7 @@
       z-index:13;
       box-shadow:0 25px 60px rgba(0,0,0,0.45);
       backdrop-filter: blur(18px);
+      padding-right:48px;
     }
     .site-header .eyebrow{
       text-transform:uppercase;
@@ -279,7 +285,7 @@
       top:clamp(280px, 32vh, 360px);
       box-shadow:0 20px 50px rgba(0,0,0,0.35);
     }
-    #menuBtn{
+    #menuLauncher{
       left:clamp(12px, 2vw, 48px);
       top:clamp(440px, 48vh, 520px);
     }
@@ -322,7 +328,7 @@
       .site-header,
       .floating-panels,
       #status,
-      #menuBtn,
+      #menuLauncher,
       #menu,
       .site-footer,
       .dock{
@@ -353,12 +359,41 @@
         position:fixed;
       }
     }
+    .floating-close{
+      position:absolute;
+      top:10px;
+      right:10px;
+      width:26px;
+      height:26px;
+      border-radius:999px;
+      border:1px solid rgba(160,180,255,0.3);
+      background:rgba(0,0,0,0.35);
+      color:var(--text);
+      cursor:pointer;
+      font-size:14px;
+      line-height:1;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+    }
+    .floating-close:hover{border-color:rgba(160,180,255,0.6)}
+    .floating-close--chip{
+      position:static;
+      width:24px;
+      height:24px;
+      background:rgba(10,13,23,0.86);
+    }
+    .menu-launcher{
+      position:relative;
+    }
+    .is-hidden{display:none !important;}
   </style>
 </head>
 <body>
 <canvas id="c"></canvas>
 
-<header class="site-header">
+<header class="site-header" id="siteHeader">
+  <button type="button" class="floating-close" data-floating-close="siteHeader" aria-label="Hide info panel">&times;</button>
   <p class="eyebrow">Swarm System Lab</p>
   <h1>Swarm Systems Lab</h1>
   <p>Autonomous hive-vs-hive simulator with weather, pheromones, and surface threats — packaged for GitHub Pages.</p>
@@ -421,6 +456,9 @@
 </div>
 
 <nav class="dock" id="panelDock" aria-label="Panel launcher">
+  <button type="button" class="dock__btn" data-floating-target="siteHeader">Info Box</button>
+  <button type="button" class="dock__btn" data-floating-target="status">Status</button>
+  <button type="button" class="dock__btn" data-floating-target="menuLauncher">Menu Control</button>
   <button type="button" class="dock__btn" data-panel-target="panel_about">About</button>
   <button type="button" class="dock__btn" data-panel-target="panel_mission">Mission Feed</button>
   <button type="button" class="dock__btn" data-panel-target="panel_help">Help</button>
@@ -434,6 +472,7 @@
 <noscript class="noscript">Enable JavaScript to command the colony.</noscript>
 
 <div id="status">
+  <button type="button" class="floating-close" data-floating-close="status" aria-label="Hide status board">&times;</button>
   <div class="srow" id="s_orange"><span class="dot orange"></span><span id="st_orange">Orange: ...</span></div>
   <div class="srow" id="s_cyan"><span class="dot cyan"></span><span id="st_cyan">Cyan: ...</span></div>
   <div class="srow" id="s_worm"><span class="dot worm"></span><span id="st_worm">Worms: ...</span></div>
@@ -441,7 +480,10 @@
   <div class="srow" id="s_beetle"><span class="dot beetle"></span><span id="st_beetle">Beetles: ...</span></div>
 </div>
 
-<div id="menuBtn">Menu</div>
+<div class="menu-launcher" id="menuLauncher">
+  <button type="button" id="menuBtn">Menu</button>
+  <button type="button" class="floating-close floating-close--chip" data-floating-close="menuLauncher" aria-label="Hide menu button">&times;</button>
+</div>
 
 <div id="menu">
   <div id="menuHeader">
@@ -537,6 +579,9 @@
   const dockMap = {};
   let panelZ = 40;
   let dragState = null;
+  const floatingDockButtons = document.querySelectorAll("[data-floating-target]");
+  const floatingCloseButtons = document.querySelectorAll("[data-floating-close]");
+  const floatingDockMap = {};
 
   const setDockState = (panelId, isOpen) => {
     (dockMap[panelId] || []).forEach(btn => {
@@ -544,6 +589,57 @@
       btn.setAttribute("aria-pressed", String(isOpen));
     });
   };
+
+  const setFloatingDockState = (targetId, isVisible) => {
+    (floatingDockMap[targetId] || []).forEach(btn => {
+      btn.classList.toggle("is-active", isVisible);
+      btn.setAttribute("aria-pressed", String(isVisible));
+    });
+  };
+
+  const hideFloatingTarget = (targetId) => {
+    if(!targetId) return;
+    const el = document.getElementById(targetId);
+    if(!el) return;
+    el.classList.add("is-hidden");
+    if(targetId === "menuLauncher"){
+      const m = document.getElementById("menu");
+      if(m) m.style.display = "none";
+    }
+    setFloatingDockState(targetId, false);
+  };
+
+  const showFloatingTarget = (targetId) => {
+    if(!targetId) return;
+    const el = document.getElementById(targetId);
+    if(!el) return;
+    el.classList.remove("is-hidden");
+    setFloatingDockState(targetId, true);
+  };
+
+  floatingCloseButtons.forEach(btn => {
+    btn.addEventListener("click", () => hideFloatingTarget(btn.dataset.floatingClose));
+  });
+
+  floatingDockButtons.forEach(btn => {
+    const targetId = btn.dataset.floatingTarget;
+    if(!targetId) return;
+    floatingDockMap[targetId] = floatingDockMap[targetId] || [];
+    floatingDockMap[targetId].push(btn);
+    const targetEl = document.getElementById(targetId);
+    const isVisible = targetEl ? !targetEl.classList.contains("is-hidden") : false;
+    btn.classList.toggle("is-active", isVisible);
+    btn.setAttribute("aria-pressed", String(isVisible));
+    btn.addEventListener("click", () => {
+      const el = document.getElementById(targetId);
+      if(!el) return;
+      if(el.classList.contains("is-hidden")){
+        showFloatingTarget(targetId);
+      } else {
+        hideFloatingTarget(targetId);
+      }
+    });
+  });
 
   const bringToFront = (panel) => {
     panel.style.zIndex = ++panelZ;
