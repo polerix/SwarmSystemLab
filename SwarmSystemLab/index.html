@@ -599,6 +599,46 @@
       font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     }
 
+    /* Collapsible "orb" mode for mobile: panel can collapse into a circle */
+    #unifiedPanel.is-collapsed{
+      width:56px;
+      height:56px;
+      max-height:56px;
+      border-radius:999px;
+      overflow:hidden;
+      cursor:pointer;
+    }
+    #unifiedPanel.is-collapsed .tab-nav,
+    #unifiedPanel.is-collapsed .tab-content{
+      display:none !important;
+    }
+    #unifiedPanel.is-collapsed .panel-header{
+      border-bottom:none;
+      padding:0;
+      height:56px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      background:rgba(10, 13, 23, 0.92);
+    }
+    #unifiedPanel .panel-header__actions{
+      display:flex;
+      gap:8px;
+      align-items:center;
+    }
+    #btnPanelCollapse{
+      border:none;
+      background:rgba(255,255,255,0.08);
+      color:var(--text);
+      border-radius:999px;
+      width:30px;
+      height:30px;
+      cursor:pointer;
+      font-weight:800;
+      line-height:30px;
+    }
+    #btnPanelCollapse:hover{ background:rgba(255,255,255,0.12); }
+
     #unifiedPanel .panel-header {
       padding: 14px 16px;
       font-weight: 700;
@@ -743,6 +783,9 @@
   <div id="unifiedPanel">
     <div class="panel-header">
       <span>Swarm System Lab</span>
+      <span class="panel-header__actions">
+        <button id="btnPanelCollapse" type="button" aria-label="Collapse panel">◦</button>
+      </span>
     </div>
     <div class="tab-nav">
       <button class="tab-btn active" data-tab="status">Status</button>
@@ -992,6 +1035,27 @@
 
       // --- UI REFACTOR: Tab Switching & Migration ---
       function setupTabs() {
+        // Collapsible "orb" panel (requested for mobile):
+        // - tap the ◦ button to collapse into a circle
+        // - tap the circle to expand back
+        const unifiedPanel = document.getElementById('unifiedPanel');
+        const btnPanelCollapse = document.getElementById('btnPanelCollapse');
+        const setCollapsed = (v) => {
+          if(!unifiedPanel) return;
+          unifiedPanel.classList.toggle('is-collapsed', !!v);
+        };
+        if(btnPanelCollapse){
+          btnPanelCollapse.addEventListener('click', (e) => {
+            e.stopPropagation();
+            setCollapsed(!unifiedPanel.classList.contains('is-collapsed'));
+          });
+        }
+        if(unifiedPanel){
+          unifiedPanel.addEventListener('click', () => {
+            if(unifiedPanel.classList.contains('is-collapsed')) setCollapsed(false);
+          });
+        }
+
         const tabs = document.querySelectorAll('.tab-btn');
         const contents = document.querySelectorAll('.tab-content');
 
@@ -1090,12 +1154,21 @@
           if(!el) return;
           el.checked = checked;
           if(!checked){
-            if(id === 'chkAllowMealworm') mobs = mobs.filter(m => m.type !== 'mealworm');
-            if(id === 'chkAllowBeetle') mobs = mobs.filter(m => m.type !== 'beetle' && m.type !== 'beetleEgg');
-            if(id === 'chkAllowWorm') mobs = mobs.filter(m => m.type !== 'worm');
-            if(id === 'chkAllowSpider') mobs = mobs.filter(m => m.type !== 'spider');
-            if(id === 'chkAllowOrange') { ants = ants.filter(a => a.team !== TEAM.ORANGE); colonies[TEAM.ORANGE].queenId = -1; }
-            if(id === 'chkAllowCyan') { ants = ants.filter(a => a.team !== TEAM.CYAN); colonies[TEAM.CYAN].queenId = -1; }
+            // NOTE: mobs/ants are defined later as `const` arrays; mutate in-place (do not reassign).
+            const removeMobs = (pred) => {
+              for(let i=mobs.length-1;i>=0;i--) if(pred(mobs[i])) mobs.splice(i,1);
+            };
+            const removeAnts = (pred) => {
+              for(let i=ants.length-1;i>=0;i--) if(pred(ants[i])) ants.splice(i,1);
+            };
+
+            if(id === 'chkAllowMealworm') removeMobs(m => m.type === 'mealworm');
+            if(id === 'chkAllowBeetle') removeMobs(m => (m.type === 'beetle' || m.type === 'beetleEgg'));
+            if(id === 'chkAllowWorm') removeMobs(m => m.type === 'worm');
+            if(id === 'chkAllowSpider') removeMobs(m => m.type === 'spider');
+
+            if(id === 'chkAllowOrange') { removeAnts(a => a.team === TEAM.ORANGE); colonies[TEAM.ORANGE].queenId = -1; }
+            if(id === 'chkAllowCyan') { removeAnts(a => a.team === TEAM.CYAN); colonies[TEAM.CYAN].queenId = -1; }
           }
           updateBadgeFor(id);
           if(!silent) updateStatus();
@@ -1109,13 +1182,18 @@
               const teamName = id === 'chkAllowOrange' ? 'Orange' : 'Cyan';
               const ok = await showConfirm('Remove ' + teamName + ' colony?', 'This will remove all ants from the ' + teamName + ' colony and cannot be undone. Proceed?');
               if(!ok){ el.checked = true; updateBadgeFor(id); saveToggles(); return; }
-              else { if(id === 'chkAllowOrange') { ants = ants.filter(a => a.team !== TEAM.ORANGE); colonies[TEAM.ORANGE].queenId = -1; } if(id === 'chkAllowCyan') { ants = ants.filter(a => a.team !== TEAM.CYAN); colonies[TEAM.CYAN].queenId = -1; } }
+              else {
+                const removeAnts = (pred) => { for(let i=ants.length-1;i>=0;i--) if(pred(ants[i])) ants.splice(i,1); };
+                if(id === 'chkAllowOrange') { removeAnts(a => a.team === TEAM.ORANGE); colonies[TEAM.ORANGE].queenId = -1; }
+                if(id === 'chkAllowCyan') { removeAnts(a => a.team === TEAM.CYAN); colonies[TEAM.CYAN].queenId = -1; }
+              }
             } else {
               if(!el.checked){
-                if(id === 'chkAllowMealworm') mobs = mobs.filter(m => m.type !== 'mealworm');
-                if(id === 'chkAllowBeetle') mobs = mobs.filter(m => m.type !== 'beetle' && m.type !== 'beetleEgg');
-                if(id === 'chkAllowWorm') mobs = mobs.filter(m => m.type !== 'worm');
-                if(id === 'chkAllowSpider') mobs = mobs.filter(m => m.type !== 'spider');
+                const removeMobs = (pred) => { for(let i=mobs.length-1;i>=0;i--) if(pred(mobs[i])) mobs.splice(i,1); };
+                if(id === 'chkAllowMealworm') removeMobs(m => m.type === 'mealworm');
+                if(id === 'chkAllowBeetle') removeMobs(m => (m.type === 'beetle' || m.type === 'beetleEgg'));
+                if(id === 'chkAllowWorm') removeMobs(m => m.type === 'worm');
+                if(id === 'chkAllowSpider') removeMobs(m => m.type === 'spider');
               }
             }
             updateBadgeFor(id);
@@ -2837,6 +2915,8 @@
       }
 
       function spawnWorm() {
+        const allowEl = document.getElementById('chkAllowWorm');
+        if(allowEl && !allowEl.checked) return;
         const n = mobs.filter(m => m.type === "worm" && !m.dead).length;
         if (n >= CAP.worms) return;
         const x = irand(20, W - 20);
@@ -2846,6 +2926,8 @@
         mobs.push(w);
       }
       function spawnBeetleImago() {
+        const allowEl = document.getElementById('chkAllowBeetle');
+        if(allowEl && !allowEl.checked) return;
         const n = mobs.filter(m => m.type === "beetle" && !m.dead).length;
         if (n >= CAP.beetles) return;
         const x = irand(10, W - 10);
@@ -2853,6 +2935,8 @@
         mobs.push({ type: "beetle", x, y, hp: 30, hpMax: 30, upTask: false, laidThisNight: false, dead: false, digSoilLast: false });
       }
       function spawnBeetleEgg(px) {
+        const allowEl = document.getElementById('chkAllowBeetle');
+        if(allowEl && !allowEl.checked) return;
         const eggs = mobs.filter(m => m.type === "beetleEgg" && !m.dead).length;
         if (eggs >= CAP.beetleEggs) return;
         mobs.push({ type: "beetleEgg", x: px, y: SURFACE_WALK_Y, t: 0, dead: false });
