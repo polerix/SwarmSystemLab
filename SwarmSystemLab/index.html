@@ -749,18 +749,48 @@
 
 
 
+    /* Mission feed toast */
+    #missionToast{
+      position:fixed;
+      left:20px;
+      bottom:20px;
+      width:min(360px, calc(100vw - 40px));
+      background:rgba(10, 13, 23, 0.88);
+      border:1px solid rgba(160, 180, 255, 0.22);
+      border-radius:16px;
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      box-shadow: 0 10px 40px rgba(0,0,0,0.45);
+      z-index: 120;
+      padding: 12px 14px;
+      color: var(--text);
+    }
+    #missionToast.is-hidden{ display:none; }
+    #missionToast .hdr{ display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:6px; }
+    #missionToast .title{ font-weight:800; font-size:12px; letter-spacing:0.12em; text-transform:uppercase; color:var(--muted); }
+    #missionToast .meta{ font-size:11px; color:rgba(232,236,255,0.75); white-space:nowrap; }
+    #missionToast .msg{ font-size:13px; color:rgba(232,236,255,0.92); line-height:1.25; }
+
     @media (max-width: 600px) {
       #unifiedPanel {
         width: calc(100vw - 24px);
         right: 12px;
         left: 12px;
       }
+      #missionToast{ left:12px; right:12px; width:auto; }
     }
   </style>
 </head>
 
 <body>
   <canvas id="c"></canvas>
+  <div id="missionToast" class="is-hidden" aria-live="polite">
+    <div class="hdr">
+      <div class="title">Mission Feed</div>
+      <div class="meta" id="missionMeta">…</div>
+    </div>
+    <div class="msg" id="missionMsg">…</div>
+  </div>
 
   <header class="site-header" id="siteHeader">
     <button type="button" class="floating-close" data-floating-close="siteHeader"
@@ -4184,6 +4214,63 @@
       const chkSM = document.getElementById("chkSM");
       const chkSB = document.getElementById("chkSB");
 
+      /* =========================================================
+         24.5) Mission Feed (self-dismissing rotating toast)
+      ========================================================= */
+      const missionToast = document.getElementById('missionToast');
+      const missionMsg = document.getElementById('missionMsg');
+      const missionMeta = document.getElementById('missionMeta');
+
+      const mission = {
+        items: [],
+        visible: false,
+        rotateT: 0,
+        showT: 0,
+        idx: 0,
+        _lastNow: performance.now()
+      };
+      let lastNightNow = null;
+      let lastRainActive = null;
+      let lastWormAlertBand = null;
+      let lastOrangePopBand = null;
+      let lastCyanPopBand = null;
+
+      function missionShow(seconds=9){
+        mission.visible = true;
+        mission.showT = Math.max(mission.showT, seconds);
+        if(missionToast) missionToast.classList.remove('is-hidden');
+      }
+      function missionHide(){
+        mission.visible = false;
+        if(missionToast) missionToast.classList.add('is-hidden');
+      }
+      function missionPush(text, seconds=9){
+        mission.items.unshift({ t: simTime, text });
+        if(mission.items.length > 20) mission.items.length = 20;
+        mission.idx = 0;
+        mission.rotateT = 0;
+        missionShow(seconds);
+      }
+      function missionTick(dt, metaStr){
+        if(missionMeta) missionMeta.textContent = metaStr || '';
+        if(!mission.visible) return;
+        mission.showT -= dt;
+        if(mission.showT <= 0){ missionHide(); return; }
+
+        if(!mission.items.length){
+          if(missionMsg) missionMsg.textContent = '…';
+          return;
+        }
+
+        mission.rotateT += dt;
+        if(mission.rotateT > 3.5){
+          mission.rotateT = 0;
+          mission.idx = (mission.idx + 1) % mission.items.length;
+        }
+        const cur = mission.items[mission.idx];
+        if(missionMsg) missionMsg.textContent = cur.text;
+      }
+
       function updateStatus() {
         const o = colonies[TEAM.ORANGE];
         const c = colonies[TEAM.CYAN];
@@ -4200,6 +4287,45 @@
         const nightNow = isNight();
         const light = surfaceLight01AtX(camera.x);
         const rainTxt = rain.active ? ` Rain ${Math.round(rain.intensity * 100)}%` : " clear";
+
+        // Mission feed: meta + event detection
+        const metaStr = `${nightNow ? 'Night' : 'Day'} · O ${co.total} · C ${cc.total}${rain.active ? ' · Rain' : ''}`;
+
+        // transitions
+        if(lastNightNow === null) lastNightNow = nightNow;
+        if(lastNightNow !== nightNow){
+          missionPush(nightNow ? 'Night falls. Surface gets dangerous.' : 'Dawn. Surface forage resumes.');
+          lastNightNow = nightNow;
+        }
+        if(lastRainActive === null) lastRainActive = rain.active;
+        if(lastRainActive !== rain.active){
+          missionPush(rain.active ? `Rain begins (${Math.round(rain.intensity*100)}%). Scent leaches into the soil.` : 'Rain clears. Trails start to fade normally.');
+          lastRainActive = rain.active;
+        }
+
+        // worm alert banding
+        const wormBand = (wormAlertT > 10) ? 3 : (wormAlertT > 4) ? 2 : (wormAlertT > 0.5) ? 1 : 0;
+        if(lastWormAlertBand === null) lastWormAlertBand = wormBand;
+        if(wormBand > lastWormAlertBand){
+          missionPush(wormBand >= 2 ? 'Worm alert rising: digging noise + pheromones are calling something up.' : 'Soil stirs. Worm scent detected.');
+          lastWormAlertBand = wormBand;
+        } else if(wormBand < lastWormAlertBand){
+          lastWormAlertBand = wormBand;
+        }
+
+        // population milestones
+        const popBand = (n) => (n>=60?4:n>=40?3:n>=20?2:n>=10?1:0);
+        const oBand = popBand(co.total), cBand = popBand(cc.total);
+        if(lastOrangePopBand === null) lastOrangePopBand = oBand;
+        if(lastCyanPopBand === null) lastCyanPopBand = cBand;
+        if(oBand > lastOrangePopBand){ missionPush(`Orange colony expands (pop ${co.total}). New castes become viable.`); lastOrangePopBand = oBand; }
+        if(cBand > lastCyanPopBand){ missionPush(`Cyan colony expands (pop ${cc.total}). New castes become viable.`); lastCyanPopBand = cBand; }
+
+        // drive mission toast timers from wall-clock (updateStatus has no dt)
+        const nowMs = performance.now();
+        const dtToast = clamp((nowMs - mission._lastNow) / 1000, 0, 0.2);
+        mission._lastNow = nowMs;
+        missionTick(dtToast, metaStr);
 
         st_orange.innerHTML =
           `Orange <span class="pill">pop ${co.total}</span>` +
