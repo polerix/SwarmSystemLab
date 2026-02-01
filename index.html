@@ -7,6 +7,8 @@
   <meta name="description"
     content="Swarm System Lab Simulator — autonomous hive warfare sandbox tuned for GitHub Pages." />
   <meta name="theme-color" content="#05060a" />
+  <!-- Assets live under /SwarmSystemLab/ in this repo; set base so GitHub Pages resolves correctly. -->
+  <base href="SwarmSystemLab/" />
   <link rel="icon" href="Ant.png" type="image/png" />
   <title>Swarm System Lab Simulator - Rebuild + Balance Lab</title>
   <style>
@@ -1415,6 +1417,16 @@
       const canvas = document.getElementById("c");
       const ctx = canvas.getContext("2d", { alpha: false });
 
+      // IMPORTANT: camera must exist before resize() runs.
+      // A previous ordering bug called resize() before camera initialization,
+      // which stopped the simulation loop and left only the UI.
+      const camera = {
+        x: 110, y: 70,
+        scale: 8.0,
+        minScale: 4.0,
+        maxScale: 80.0
+      };
+
       function resize() {
         canvas.width = Math.floor(innerWidth * devicePixelRatio);
         canvas.height = Math.floor(innerHeight * devicePixelRatio);
@@ -1423,22 +1435,13 @@
         ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
 
         // Auto-Fit Width (Edge-to-Edge)
-        if (typeof W !== 'undefined') {
-          camera.scale = innerWidth / W;
-          camera.minScale = camera.scale;
-          camera.maxScale = camera.scale;
-          camera.x = W / 2; // Center
-        }
+        camera.scale = innerWidth / W;
+        camera.minScale = camera.scale;
+        camera.maxScale = camera.scale;
+        camera.x = W / 2; // Center
       }
       addEventListener("resize", resize);
       resize();
-
-      const camera = {
-        x: 110, y: 70,
-        scale: 8.0,
-        minScale: 4.0,
-        maxScale: 80.0
-      };
 
       // Interior Sphere Projection
 
