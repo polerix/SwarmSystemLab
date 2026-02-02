@@ -144,33 +144,195 @@
   /* =========================================================
      3) UI menu (show/hide + drag)
   ========================================================= */
-  const menuBtn = document.getElementById("menuBtn");
-  const menu = document.getElementById("menu");
-  const menuHeader = document.getElementById("menuHeader");
-  const menuClose = document.getElementById("menuClose");
+      // --- UI REFACTOR: Tab Switching & Migration ---
+      function setupTabs() {
+        // Collapsible "orb" panel (requested for mobile):
+        // - tap the ◦ button to collapse into a circle
+        // - tap the circle to expand back
+        const unifiedPanel = document.getElementById('unifiedPanel');
+        const btnPanelCollapse = document.getElementById('btnPanelCollapse');
+        const setCollapsed = (v) => {
+          if(!unifiedPanel) return;
+          unifiedPanel.classList.toggle('is-collapsed', !!v);
+        };
+        if(btnPanelCollapse){
+          btnPanelCollapse.addEventListener('click', (e) => {
+            e.stopPropagation();
+            setCollapsed(!unifiedPanel.classList.contains('is-collapsed'));
+          });
+        }
+        if(unifiedPanel){
+          unifiedPanel.addEventListener('mouseenter', () => {
+            if(unifiedPanel.classList.contains('is-collapsed')) setCollapsed(false);
+          });
+        }
 
-  const toggleMenu = () => {
-    menu.style.display = (menu.style.display === "none" || !menu.style.display) ? "block" : "none";
-  };
-  menuBtn.addEventListener("click", toggleMenu);
-  menuClose.addEventListener("click", () => menu.style.display = "none");
+        const tabs = document.querySelectorAll('.tab-btn');
+        const contents = document.querySelectorAll('.tab-content');
 
-  let draggingMenu = false;
-  let menuOffX=0, menuOffY=0;
-  menuHeader.addEventListener("mousedown", (e) => {
-    draggingMenu = true;
-    const r = menu.getBoundingClientRect();
-    menuOffX = e.clientX - r.left;
-    menuOffY = e.clientY - r.top;
-  });
-  addEventListener("mouseup", () => draggingMenu = false);
-  addEventListener("mousemove", (e) => {
-    if(!draggingMenu) return;
-    const x = clamp(e.clientX - menuOffX, 0, innerWidth - 40);
-    const y = clamp(e.clientY - menuOffY, 40, innerHeight - 40);
-    menu.style.left = x + "px";
-    menu.style.top = y + "px";
-  });
+        tabs.forEach(btn => {
+          btn.addEventListener('click', () => {
+            // Remove active class
+            tabs.forEach(t => t.classList.remove('active'));
+            contents.forEach(c => c.classList.remove('active'));
+
+            // Add active class
+            btn.classList.add('active');
+            const targetId = `tab_${btn.dataset.tab}`;
+            document.getElementById(targetId).classList.add('active');
+          });
+        });
+
+        // Migrate Controls
+        const menuBody = document.getElementById('menuBody');
+        const controlsContainer = document.getElementById('controlsContainer');
+        if (menuBody && controlsContainer) {
+          // Move specific sections
+          while (menuBody.childNodes.length > 0) {
+            const node = menuBody.childNodes[0];
+            // Filter out the Lab section for separate tab
+            if (node.classList && node.classList.contains('labBox')) {
+              document.getElementById('labContainer').appendChild(node);
+            } else if (node.tagName === 'DETAILS') {
+              // Skip hints (redundant with Info tab)
+              menuBody.removeChild(node);
+            } else {
+              controlsContainer.appendChild(node);
+            }
+          }
+        }
+
+        // Migrate Status
+        const statusBoard = document.getElementById('status');
+        const statusContainer = document.getElementById('statusContainer');
+        if (statusBoard && statusContainer) {
+          // Clone children to preserve IDs for JS updates
+          Array.from(statusBoard.children).forEach(child => {
+            if (!child.classList.contains('floating-close')) {
+              statusContainer.appendChild(child);
+            }
+          });
+        }
+
+        // Wire allow toggles (remove existing instances when unchecked) and persist states
+        const TOGGLE_IDS = ['chkAllowMealworm','chkAllowBeetle','chkAllowWorm','chkAllowSpider','chkAllowOrange','chkAllowCyan'];
+        const confirmModal = document.getElementById('confirmModal');
+        const confirmTitle = document.getElementById('confirmTitle');
+        const confirmMsg = document.getElementById('confirmMsg');
+        const confirmYes = document.getElementById('confirmYes');
+        const confirmNo = document.getElementById('confirmNo');
+
+        function showConfirm(title, msg){
+          return new Promise((resolve) => {
+            confirmTitle.textContent = title;
+            confirmMsg.textContent = msg;
+            confirmModal.classList.remove('is-hidden');
+            const cleanup = () => {
+              confirmModal.classList.add('is-hidden');
+              confirmYes.removeEventListener('click', onYes);
+              confirmNo.removeEventListener('click', onNo);
+              document.removeEventListener('keydown', onKey);
+            };
+            const onYes = () => { cleanup(); resolve(true); };
+            const onNo = () => { cleanup(); resolve(false); };
+            const onKey = (e) => { if(e.key === 'Escape') { onNo(); } };
+            confirmYes.addEventListener('click', onYes);
+            confirmNo.addEventListener('click', onNo);
+            document.addEventListener('keydown', onKey);
+          });
+        }
+
+        const getBadgeIdFromToggle = (id) => 'badge' + id.slice(3);
+        const updateBadgeFor = (id) => {
+          const badge = document.getElementById(getBadgeIdFromToggle(id));
+          const el = document.getElementById(id);
+          if(!badge) return;
+          if(el && el.checked) badge.classList.remove('visible'); else badge.classList.add('visible');
+          badge.classList.toggle('disabled', !(el && el.checked));
+        };
+
+        function saveToggles(){
+          const obj = {};
+          TOGGLE_IDS.forEach(id => {
+            const el = document.getElementById(id);
+            if(el) obj[id] = el.checked;
+          });
+          try{ localStorage.setItem('swarm:toggles', JSON.stringify(obj)); }catch(e){}
+        }
+
+        const applyToggleState = (id, checked, silent=false) => {
+          const el = document.getElementById(id);
+          if(!el) return;
+          el.checked = checked;
+          if(!checked){
+            // NOTE: mobs/ants are defined later as `const` arrays; mutate in-place (do not reassign).
+            const removeMobs = (pred) => {
+              for(let i=mobs.length-1;i>=0;i--) if(pred(mobs[i])) mobs.splice(i,1);
+            };
+            const removeAnts = (pred) => {
+              for(let i=ants.length-1;i>=0;i--) if(pred(ants[i])) ants.splice(i,1);
+            };
+
+            if(id === 'chkAllowMealworm') removeMobs(m => m.type === 'mealworm');
+            if(id === 'chkAllowBeetle') removeMobs(m => (m.type === 'beetle' || m.type === 'beetleEgg'));
+            if(id === 'chkAllowWorm') removeMobs(m => m.type === 'worm');
+            if(id === 'chkAllowSpider') removeMobs(m => m.type === 'spider');
+
+            if(id === 'chkAllowOrange') { removeAnts(a => a.team === TEAM.ORANGE); colonies[TEAM.ORANGE].queenId = -1; }
+            if(id === 'chkAllowCyan') { removeAnts(a => a.team === TEAM.CYAN); colonies[TEAM.CYAN].queenId = -1; }
+          }
+          updateBadgeFor(id);
+          if(!silent) updateStatus();
+        };
+
+        const togglePop = (id) => {
+          const el = document.getElementById(id);
+          if(!el) return;
+          el.addEventListener('change', async () => {
+            if((id === 'chkAllowOrange' || id === 'chkAllowCyan') && !el.checked){
+              const teamName = id === 'chkAllowOrange' ? 'Orange' : 'Cyan';
+              const ok = await showConfirm('Remove ' + teamName + ' colony?', 'This will remove all ants from the ' + teamName + ' colony and cannot be undone. Proceed?');
+              if(!ok){ el.checked = true; updateBadgeFor(id); saveToggles(); return; }
+              else {
+                const removeAnts = (pred) => { for(let i=ants.length-1;i>=0;i--) if(pred(ants[i])) ants.splice(i,1); };
+                if(id === 'chkAllowOrange') { removeAnts(a => a.team === TEAM.ORANGE); colonies[TEAM.ORANGE].queenId = -1; }
+                if(id === 'chkAllowCyan') { removeAnts(a => a.team === TEAM.CYAN); colonies[TEAM.CYAN].queenId = -1; }
+              }
+            } else {
+              if(!el.checked){
+                const removeMobs = (pred) => { for(let i=mobs.length-1;i>=0;i--) if(pred(mobs[i])) mobs.splice(i,1); };
+                if(id === 'chkAllowMealworm') removeMobs(m => m.type === 'mealworm');
+                if(id === 'chkAllowBeetle') removeMobs(m => (m.type === 'beetle' || m.type === 'beetleEgg'));
+                if(id === 'chkAllowWorm') removeMobs(m => m.type === 'worm');
+                if(id === 'chkAllowSpider') removeMobs(m => m.type === 'spider');
+              }
+            }
+            updateBadgeFor(id);
+            saveToggles();
+            updateStatus();
+          });
+        };
+
+        TOGGLE_IDS.forEach(togglePop);
+
+        // Initialize from localStorage (silent)
+        try{
+          const stored = JSON.parse(localStorage.getItem('swarm:toggles') || '{}');
+          TOGGLE_IDS.forEach(id => {
+            if(Object.prototype.hasOwnProperty.call(stored, id)) applyToggleState(id, !!stored[id], true);
+            else updateBadgeFor(id);
+          });
+        }catch(e){ TOGGLE_IDS.forEach(id => updateBadgeFor(id)); }
+      }
+
+      // Run setup
+      window.addEventListener('DOMContentLoaded', setupTabs);
+      
+  const unifiedPanel = document.getElementById('unifiedPanel');
+  if (unifiedPanel) {
+    unifiedPanel.classList.add('is-collapsed');
+  }
+      // ----------------------------------------------
 
   /* =========================================================
      4) World grid
