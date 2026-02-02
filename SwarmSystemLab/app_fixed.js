@@ -336,8 +336,12 @@
 
   const TILE = { AIR:0, SOIL:1, TUNNEL:2, ROCKS:3, ROCKM:4, ROCKL:5 };
   const TEAM = { ORANGE:0, CYAN:1 };
-  const idx = (x,y) => x + y*W;
-  const inb = (x,y) => x>=0 && y>=0 && x<W && y<H;
+  
+  // Wrap x coordinate for horizontal looping
+  const wrapX = (x) => ((x % W) + W) % W;
+  
+  const idx = (x,y) => wrapX(x) + y*W;
+  const inb = (x,y) => y>=0 && y<H; // x always valid due to wrapping
 
   const tile = new Uint8Array(W*H);
   const owner = new Uint8Array(W*H);
@@ -348,10 +352,10 @@
   const bonusType = new Uint8Array(W*H);
   const bonusAmt  = new Float32Array(W*H);
 
-  const tileAt = (x,y) => tile[idx(x,y)];
-  const setTile = (x,y,t) => tile[idx(x,y)] = t;
-  const getOwner = (x,y) => owner[idx(x,y)];
-  const setOwner = (x,y,v) => owner[idx(x,y)] = v;
+  const tileAt = (x,y) => tile[idx(wrapX(x),y)];
+  const setTile = (x,y,t) => tile[idx(wrapX(x),y)] = t;
+  const getOwner = (x,y) => owner[idx(wrapX(x),y)];
+  const setOwner = (x,y,v) => owner[idx(wrapX(x),y)] = v;
 
   const isSoil = (x,y) => inb(x,y) && tileAt(x,y) === TILE.SOIL;
   const isTunnel = (x,y) => inb(x,y) && tileAt(x,y) === TILE.TUNNEL;
@@ -364,12 +368,12 @@
   function passableForAnt(x,y){
     if(!inb(x,y)) return false;
     if(y === SURFACE_WALK_Y) return true;
-    return tileAt(x,y) === TILE.TUNNEL;
+    return tileAt(wrapX(x),y) === TILE.TUNNEL;
   }
   function passableForMob(x,y){
     if(!inb(x,y)) return false;
     if(y === SURFACE_WALK_Y) return true;
-    const t = tileAt(x,y);
+    const t = tileAt(wrapX(x),y);
     return t === TILE.TUNNEL || t === TILE.SOIL;
   }
 
@@ -402,14 +406,14 @@
   }
   function depositPher(team, type, x,y, amt){
     if(!inb(x,y)) return;
-    const i = idx(x,y);
+    const i = idx(wrapX(x),y);
     pher[team][type][i] = Math.min(1, pher[team][type][i] + amt);
   }
   function bestNeighborForPher(team, type, x,y, wantHigh=true){
-    let best = { x, y, v: pher[team][type][idx(x,y)] };
+    let best = { x: wrapX(x), y, v: pher[team][type][idx(wrapX(x),y)] };
     const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
     for(const [dx,dy] of dirs){
-      const nx=x+dx, ny=y+dy;
+      const nx=wrapX(x+dx), ny=y+dy;
       if(!passableForAnt(nx,ny)) continue;
       const v = pher[team][type][idx(nx,ny)];
       if(wantHigh){
@@ -470,14 +474,16 @@
   function tickSky(dt){
     for(const cl of clouds){
       cl.x += cl.speed * dt;
-      if(cl.x > W + cl.w) cl.x = -cl.w;
+      cl.x = wrapX(cl.x); // Wrap cloud position
     }
   }
   function cloudCoverAtX(x){
     let c = 0;
+    const wx = wrapX(x);
     for(const cl of clouds){
-      let dx = Math.abs(x - cl.x);
-      dx = Math.min(dx, W - dx);
+      // Calculate wrapped distance (shortest path around the world)
+      let dx = Math.abs(wx - cl.x);
+      dx = Math.min(dx, W - dx); // Handle wrap-around distance
       const sigma = cl.w * 0.35;
       const gauss = Math.exp(-(dx*dx)/(2*sigma*sigma));
       c += cl.alpha * gauss;
@@ -526,7 +532,7 @@
     if(resources.length >= CAP.resources) return null;
     const r = {
       id: nextResId++,
-      kind, x,y,
+      kind, x: wrapX(x), y,
       mass: Math.max(0.1, mass),
       energy: Math.max(0, energy),
       dead:false,
@@ -537,9 +543,10 @@
     return r;
   }
   function resourceAt(x,y, pred){
+    const wx = wrapX(x);
     for(const r of resources){
       if(r.dead) continue;
-      if(r.x===x && r.y===y && pred(r)) return r;
+      if(wrapX(r.x)===wx && r.y===y && pred(r)) return r;
     }
     return null;
   }
@@ -550,7 +557,7 @@
       if(r.dead) continue;
       if(r.locked) continue;
       if(!pred(r)) continue;
-      const d = Math.abs(r.x-x) + Math.abs(r.y-y);
+      const d = wrappedDist(x, y, r.x, r.y);
       if(d < bestD && d <= maxDist){
         bestD = d;
         best = r;
@@ -601,23 +608,28 @@
       if(rr.dead) continue;
       if(rr.kind !== "dirt") continue;
       if(!rr.locked) continue;
-      if(Math.abs(rr.x - x) <= 2 && Math.abs(rr.y - y) <= 1){
+      const dx = Math.abs(wrapX(rr.x) - wrapX(x));
+      const wrappedDx = Math.min(dx, W - dx);
+      if(wrappedDx <= 2 && Math.abs(rr.y - y) <= 1){
         rr.mass += r.mass;
         r.dead = true;
         return;
       }
     }
-    r.x = x; r.y = y;
+    r.x = wrapX(x); r.y = y;
     r.locked = true;
   }
 
   function isCoverAt(x,y){
     if(y !== SURFACE_WALK_Y) return false;
+    const wx = wrapX(x);
     for(const r of resources){
       if(r.dead) continue;
       if(r.kind !== "leaf") continue;
       if(r.y !== SURFACE_WALK_Y) continue;
-      if(Math.abs(r.x - x) <= 2) return true;
+      let dx = Math.abs(wrapX(r.x) - wx);
+      dx = Math.min(dx, W - dx);
+      if(dx <= 2) return true;
     }
     return false;
   }
@@ -649,7 +661,7 @@
           const leafCost = 3.2 * CFG.leafFallMult;
           if(p.e >= leafCost){
             p.e -= leafCost;
-            addRes("leaf", clamp(p.x + irand(-1,1), 1, W-2), SURFACE_WALK_Y, 6.0, leafCost);
+            addRes("leaf", wrapX(p.x + irand(-1,1)), SURFACE_WALK_Y, 6.0, leafCost);
           }
         }
       }
@@ -779,21 +791,31 @@
   }
 
   function moveToward(a, tx, ty){
-    let best = { x:a.x, y:a.y, d: Math.abs(tx-a.x)+Math.abs(ty-a.y) };
+    // Handle wrapping for target distance calculation
+    const wrappedTx = wrapX(tx);
+    let best = { x: wrapX(a.x), y:a.y, d: wrappedDist(a.x, a.y, tx, ty) };
     const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
     for(const [dx,dy] of dirs){
-      const nx=a.x+dx, ny=a.y+dy;
+      const nx=wrapX(a.x+dx), ny=a.y+dy;
       if(!passableForAnt(nx,ny)) continue;
-      const d = Math.abs(tx-nx)+Math.abs(ty-ny);
+      const d = wrappedDist(nx, ny, tx, ty);
       if(d < best.d) best = { x:nx, y:ny, d };
     }
     a.x = best.x; a.y = best.y;
   }
+  
+  // Calculate Manhattan distance with horizontal wrapping
+  function wrappedDist(x1, y1, x2, y2) {
+    let dx = Math.abs(wrapX(x1) - wrapX(x2));
+    dx = Math.min(dx, W - dx); // Shorter path around the world
+    return dx + Math.abs(y1 - y2);
+  }
+  
   function wanderAnt(a){
     const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
     for(let k=0;k<4;k++){
       const [dx,dy] = choice(dirs);
-      const nx=a.x+dx, ny=a.y+dy;
+      const nx=wrapX(a.x+dx), ny=a.y+dy;
       if(passableForAnt(nx,ny)){ a.x=nx; a.y=ny; return; }
     }
   }
@@ -813,12 +835,11 @@
   function updateDeepest(col){
     let deepest = col.deepestY;
     const teamOwner = col.team + 1;
-    const x0 = clamp(col.homeX - 18, 0, W-1);
-    const x1 = clamp(col.homeX + 18, 0, W-1);
     const y0 = surfaceY + 1;
     const y1 = H - 2;
     for(let y=y1; y>=y0; y--){
-      for(let x=x0; x<=x1; x++){
+      for(let dx=-18; dx<=18; dx++){
+        const x = wrapX(col.homeX + dx);
         if(tileAt(x,y) === TILE.TUNNEL && getOwner(x,y) === teamOwner){
           deepest = Math.max(deepest, y);
         }
@@ -952,7 +973,7 @@
         nutrients[idx(hx,hy)] = clamp(nutrients[idx(hx,hy)] + 0.30, 0, 1);
         moisture[idx(hx,hy)] = clamp(moisture[idx(hx,hy)] + 0.12, 0, 1);
       } else if(r.kind==="dirt"){
-        const dp = { x: clamp(col.homeX + irand(-4,4), 2, W-3), y: SURFACE_WALK_Y };
+        const dp = { x: wrapX(col.homeX + irand(-4,4)), y: SURFACE_WALK_Y };
         r.x = dp.x; r.y = dp.y;
         mergeOrLockDirtDrop(r, dp.x, dp.y);
         a.carried = null;
@@ -972,7 +993,7 @@
     for(const m of mobs){
       if(m.dead) continue;
       if(m.type!=="worm" && m.type!=="beetle") continue;
-      const d = Math.abs(m.x-x)+Math.abs(m.y-y);
+      const d = wrappedDist(x, y, m.x, m.y);
       if(d < best) best = d;
     }
     return best;
@@ -1042,7 +1063,7 @@
 
         const hatchX = a.x + (Math.random()<0.5?-1:1);
         const hatchY = a.y + (Math.random()<0.5?-1:1);
-        spawnAnt(a.team, caste, clamp(hatchX,1,W-2), clamp(hatchY,surfaceY+1,H-2));
+        spawnAnt(a.team, caste, wrapX(hatchX), clamp(hatchY,surfaceY+1,H-2));
       }
     }
   }
@@ -1069,7 +1090,7 @@
     for(const m of mobs){
       if(m.dead) continue;
       if(m.type!=="beetle" && m.type!=="worm") continue;
-      const d = Math.abs(m.x-a.x)+Math.abs(m.y-a.y);
+      const d = wrappedDist(a.x, a.y, m.x, m.y);
       if(d < bestD){ bestD=d; target=m; }
     }
 
@@ -1088,7 +1109,7 @@
       spendEnergy(a, st.moveE);
     }
 
-    if(target && a.x===target.x && a.y===target.y){
+    if(target && wrapX(a.x)===wrapX(target.x) && a.y===target.y){
       const dmg = (target.type==="beetle") ? 10 : 8;
       target.hp -= dmg*dt;
       if(target.hp <= 0){
@@ -1121,7 +1142,7 @@
     for(const m of mobs){
       if(m.dead) continue;
       if(m.type!=="beetle") continue;
-      const d = Math.abs(m.x-a.x)+Math.abs(m.y-a.y);
+      const d = wrappedDist(a.x, a.y, m.x, m.y);
       if(d < bestD){ bestD=d; target=m; }
     }
 
@@ -1139,7 +1160,7 @@
       spendEnergy(a, st.moveE);
     }
 
-    if(target && a.x===target.x && a.y===target.y){
+    if(target && wrapX(a.x)===wrapX(target.x) && a.y===target.y){
       target.hp -= 8*dt;
       if(target.hp <= 0){
         target.dead = true;
@@ -1273,7 +1294,7 @@
       }
 
       if(a.y === SURFACE_WALK_Y){
-        if(Math.random() < 0.55) a.x = clamp(a.x + (Math.random()<0.5?-1:1), 1, W-2);
+        if(Math.random() < 0.55) a.x = wrapX(a.x + (Math.random()<0.5?-1:1));
 
         const target = findNearestRes(a.x,a.y, (r) => {
           if(!canCarry(a)) return false;
@@ -1337,24 +1358,24 @@
     let best = null;
     let bestScore = -1e9;
 
-    const x0 = clamp(Math.floor(x-rad), 1, W-2);
-    const x1 = clamp(Math.floor(x+rad), 1, W-2);
+    // For wrapping, we scan the range but wrap coordinates when accessing tiles
     const y0 = clamp(Math.floor(y-rad), surfaceY+1, H-2);
     const y1 = clamp(Math.floor(y+rad), surfaceY+1, H-2);
 
     for(let yy=y0; yy<=y1; yy++){
-      for(let xx=x0; xx<=x1; xx++){
+      for(let dx=-rad; dx<=rad; dx++){
+        const xx = wrapX(Math.floor(x + dx));
         if(!isTunnel(xx,yy)) continue;
         if(getOwner(xx,yy) !== team+1) continue;
 
         const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
-        for(const [dx,dy] of dirs){
-          const sx=xx+dx, sy=yy+dy;
+        for(const [ddx,ddy] of dirs){
+          const sx=wrapX(xx+ddx), sy=yy+ddy;
           if(!inb(sx,sy)) continue;
           if(!isSoil(sx,sy)) continue;
           if(isRock(sx,sy)) continue;
 
-          const d = Math.abs(xx-x)+Math.abs(yy-y);
+          const d = wrappedDist(xx, yy, x, y);
           const bt = bonusType[idx(sx,sy)];
           const bonusBoost = (bt===1? 2.8 : bt===3? 1.6 : bt===2? 1.0 : 0.0);
           const score = (50 - d) + bonusBoost + (sy - surfaceY)*0.02 + moisture[idx(sx,sy)]*0.5;
@@ -1398,8 +1419,8 @@
       if(a.carried){
         const r = resources.find(rr => rr.id===a.carried && !rr.dead);
         if(r && r.kind==="dirt"){
-          const dp = { x: clamp(col.homeX + irand(-5,5), 2, W-3), y: SURFACE_WALK_Y };
-          if(a.x !== dp.x || a.y !== dp.y) moveToward(a, dp.x, dp.y);
+          const dp = { x: wrapX(col.homeX + irand(-5,5)), y: SURFACE_WALK_Y };
+          if(wrapX(a.x) !== dp.x || a.y !== dp.y) moveToward(a, dp.x, dp.y);
           else {
             mergeOrLockDirtDrop(r, dp.x, dp.y);
             a.carried = null;
@@ -1593,13 +1614,13 @@
   }
 
   function stepMobGreedy(m, tx, ty){
-    let best = { x:m.x, y:m.y, d: Math.abs(tx-m.x)+Math.abs(ty-m.y) };
+    let best = { x: wrapX(m.x), y:m.y, d: wrappedDist(m.x, m.y, tx, ty) };
     const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
     for(const [dx,dy] of dirs){
-      const nx=m.x+dx, ny=m.y+dy;
+      const nx=wrapX(m.x+dx), ny=m.y+dy;
       if(!passableForMob(nx,ny)) continue;
       if(isRock(nx,ny)) continue;
-      const d = Math.abs(tx-nx)+Math.abs(ty-ny);
+      const d = wrappedDist(nx, ny, tx, ty);
       if(d < best.d) best = { x:nx, y:ny, d };
     }
     m.x = best.x; m.y = best.y;
@@ -1608,7 +1629,7 @@
     const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
     for(let k=0;k<4;k++){
       const [dx,dy] = choice(dirs);
-      const nx=m.x+dx, ny=m.y+dy;
+      const nx=wrapX(m.x+dx), ny=m.y+dy;
       if(!passableForMob(nx,ny)) continue;
       if(isRock(nx,ny)) continue;
       m.x=nx; m.y=ny;
@@ -1660,7 +1681,7 @@
       stepMobGreedy(b, b.x, SURFACE_WALK_Y);
       if(b.y === SURFACE_WALK_Y){
         const n = irand(1,3);
-        for(let i=0;i<n;i++) spawnBeetleEgg(clamp(b.x + irand(-3,3), 2, W-3));
+        for(let i=0;i<n;i++) spawnBeetleEgg(wrapX(b.x + irand(-3,3)));
         b.laidThisNight = true;
       }
     } else if(nightNow && b.laidThisNight && b.y <= SURFACE_WALK_Y){
@@ -1669,13 +1690,13 @@
       let prey = null, bestD = 9999;
       for(const a of ants){
         if(a.hp<=0) continue;
-        const d = Math.abs(a.x-b.x)+Math.abs(a.y-b.y);
+        const d = wrappedDist(a.x, a.y, b.x, b.y);
         if(d < bestD){ bestD=d; prey=a; }
       }
       if(prey && prey.y===SURFACE_WALK_Y && isCoverAt(prey.x, SURFACE_WALK_Y)) prey = null;
       if(prey && bestD <= 10){
         stepMobGreedy(b, prey.x, prey.y);
-        if(b.x===prey.x && b.y===prey.y) prey.hp -= 6*dt;
+        if(wrapX(b.x)===wrapX(prey.x) && b.y===prey.y) prey.hp -= 6*dt;
       } else {
         mobWander(b);
       }
@@ -1706,16 +1727,16 @@
     if(w.upTask){
       for(const a of ants){
         if(a.hp<=0) continue;
-        const d = Math.abs(a.x-w.x)+Math.abs(a.y-w.y);
+        const d = wrappedDist(a.x, a.y, w.x, w.y);
         if(d < bestD){ bestD=d; prey=a; }
       }
       if(prey && prey.y===SURFACE_WALK_Y && isCoverAt(prey.x, SURFACE_WALK_Y)) prey = null;
     }
 
     const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
-    let best = { x:w.x, y:w.y, s:-1e9 };
+    let best = { x: wrapX(w.x), y:w.y, s:-1e9 };
     for(const [dx,dy] of dirs){
-      const nx=w.x+dx, ny=w.y+dy;
+      const nx=wrapX(w.x+dx), ny=w.y+dy;
       if(!passableForMob(nx,ny)) continue;
       if(isRock(nx,ny)) continue;
 
@@ -1732,7 +1753,7 @@
         if(tileAt(nx,ny) === TILE.TUNNEL) s -= 1.0;
       }
       if(prey){
-        const d = Math.abs(prey.x-nx)+Math.abs(prey.y-ny);
+        const d = wrappedDist(nx, ny, prey.x, prey.y);
         s += (18 - d) * 0.25;
       }
       s += (Math.random()-0.5)*0.10;
@@ -1744,7 +1765,7 @@
 
     for(const a of ants){
       if(a.hp<=0) continue;
-      if(a.x===w.x && a.y===w.y){
+      if(wrapX(a.x)===wrapX(w.x) && a.y===w.y){
         let dmg = (a.caste===CASTE.QUEEN) ? 0.8 : 0.5;
         if(w.upTask) dmg = (a.caste===CASTE.QUEEN) ? 10 : 6;
         a.hp -= dmg*dt;
@@ -1768,10 +1789,14 @@
     for(let i=1;i<w.seg.length;i++){
       const prev = w.seg[i-1];
       const cur = w.seg[i];
-      const dx = prev.x - cur.x;
+      // Handle wrapping distance for segment following
+      let dx = prev.x - cur.x;
+      // Choose shorter path around the world
+      if(dx > W/2) dx -= W;
+      if(dx < -W/2) dx += W;
       const dy = prev.y - cur.y;
       if(Math.abs(dx)+Math.abs(dy) > 1){
-        cur.x += Math.sign(dx);
+        cur.x = wrapX(cur.x + Math.sign(dx));
         cur.y += Math.sign(dy);
       }
     }
@@ -2363,12 +2388,16 @@
 
     if(nightMix > 0.02){
       for(const st of stars){
-        const ss = worldToScreen(st.x, st.y);
-        if(ss.sy < 0 || ss.sy > skyBottom) continue;
-        const tw = 0.65 + 0.35*Math.sin(performance.now()*0.002 + st.tw);
-        ctx.globalAlpha = st.a * tw * nightMix;
-        ctx.fillStyle = "rgba(255,255,255,0.95)";
-        ctx.fillRect(ss.sx, ss.sy, 1.5, 1.5);
+        // Draw stars at multiple wrap positions if near edge of view
+        for(let wrapOffset = -W; wrapOffset <= W; wrapOffset += W) {
+          const ss = worldToScreen(st.x + wrapOffset, st.y);
+          if(ss.sx < -10 || ss.sx > innerWidth + 10) continue;
+          if(ss.sy < 0 || ss.sy > skyBottom) continue;
+          const tw = 0.65 + 0.35*Math.sin(performance.now()*0.002 + st.tw);
+          ctx.globalAlpha = st.a * tw * nightMix;
+          ctx.fillStyle = "rgba(255,255,255,0.95)";
+          ctx.fillRect(ss.sx, ss.sy, 1.5, 1.5);
+        }
       }
       ctx.globalAlpha = 1;
     }
@@ -2418,19 +2447,24 @@
     }
 
     for(const cl of clouds){
-      const cs = worldToScreen(cl.x, cl.y);
-      const cloudVis = cl.alpha * (0.18 + 0.82*dayMix);
-      ctx.globalAlpha = cloudVis;
-      ctx.fillStyle = "rgba(255,255,255,0.95)";
-      const px = cs.sx, py = cs.sy;
-      const w = cl.w * camera.scale * 0.22;
-      const h = cl.h * camera.scale * 0.22;
-      ctx.beginPath();
-      ctx.ellipse(px, py, w, h, 0, 0, Math.PI*2);
-      ctx.ellipse(px + w*0.6, py + h*0.1, w*0.9, h*0.95, 0, 0, Math.PI*2);
-      ctx.ellipse(px - w*0.7, py + h*0.05, w*0.75, h*0.80, 0, 0, Math.PI*2);
-      ctx.fill();
-      ctx.globalAlpha = 1;
+      // Draw clouds at multiple wrap positions if near edge of view
+      for(let wrapOffset = -W; wrapOffset <= W; wrapOffset += W) {
+        const cs = worldToScreen(cl.x + wrapOffset, cl.y);
+        const cloudVis = cl.alpha * (0.18 + 0.82*dayMix);
+        // Skip if too far off screen
+        const w = cl.w * camera.scale * 0.22;
+        if(cs.sx < -w*3 || cs.sx > innerWidth + w*3) continue;
+        ctx.globalAlpha = cloudVis;
+        ctx.fillStyle = "rgba(255,255,255,0.95)";
+        const px = cs.sx, py = cs.sy;
+        const h = cl.h * camera.scale * 0.22;
+        ctx.beginPath();
+        ctx.ellipse(px, py, w, h, 0, 0, Math.PI*2);
+        ctx.ellipse(px + w*0.6, py + h*0.1, w*0.9, h*0.95, 0, 0, Math.PI*2);
+        ctx.ellipse(px - w*0.7, py + h*0.05, w*0.75, h*0.80, 0, 0, Math.PI*2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
     }
 
     if(rain.active){
@@ -2461,9 +2495,10 @@
     for(let y=y0;y<=y1;y++){
       for(let x=x0;x<=x1;x++){
         if(y < surfaceY) continue;
-        if(tileAt(x,y) !== TILE.TUNNEL && y !== SURFACE_WALK_Y) continue;
+        const wx = wrapX(x);
+        if(tileAt(wx,y) !== TILE.TUNNEL && y !== SURFACE_WALK_Y) continue;
 
-        const i = idx(x,y);
+        const i = idx(wx,y);
         const home = Math.max(pher[0][PH.HOME][i], pher[1][PH.HOME][i]);
         const food = Math.max(pher[0][PH.FOOD][i], pher[1][PH.FOOD][i]);
         const dang = Math.max(pher[0][PH.DANGER][i], pher[1][PH.DANGER][i]);
@@ -2489,6 +2524,9 @@
       }
     }
   }
+  
+  // Alias for wrapped pheromone rendering (same function now handles wrapping)
+  const renderPheromonesWrapped = renderPheromones;
 
   function drawEndOverlay(){
     const o = colonies[TEAM.ORANGE];
@@ -2530,21 +2568,25 @@
 
     const w0 = screenToWorld(0,0);
     const w1 = screenToWorld(innerWidth, innerHeight);
-    const x0 = clamp(Math.floor(Math.min(w0.wx,w1.wx)) - 2, 0, W-1);
-    const x1 = clamp(Math.floor(Math.max(w0.wx,w1.wx)) + 2, 0, W-1);
+    
+    // Calculate visible range - may span across the wrap boundary
+    const viewMinX = Math.floor(Math.min(w0.wx,w1.wx)) - 2;
+    const viewMaxX = Math.floor(Math.max(w0.wx,w1.wx)) + 2;
     const y0 = clamp(Math.floor(Math.min(w0.wy,w1.wy)) - 2, 0, H-1);
     const y1 = clamp(Math.floor(Math.max(w0.wy,w1.wy)) + 2, 0, H-1);
 
+    // Draw tiles with wrapping
     for(let y=y0; y<=y1; y++){
-      for(let x=x0; x<=x1; x++){
+      for(let x=viewMinX; x<=viewMaxX; x++){
         if(y < surfaceY) continue;
-
-        const t = tileAt(x,y);
-        const s = worldToScreen(x,y);
+        
+        const wx = wrapX(x); // Get wrapped x for tile lookup
+        const t = tileAt(wx,y);
+        const s = worldToScreen(x,y); // Use unwrapped x for screen position
 
         let fill = "rgb(0,0,0)";
-        if(t === TILE.SOIL) fill = ((x+y)&1) ? cssVar("--soil1") : cssVar("--soil2");
-        else if(t === TILE.TUNNEL) fill = ((x+y)&1) ? cssVar("--tun1") : cssVar("--tun2");
+        if(t === TILE.SOIL) fill = ((wx+y)&1) ? cssVar("--soil1") : cssVar("--soil2");
+        else if(t === TILE.TUNNEL) fill = ((wx+y)&1) ? cssVar("--tun1") : cssVar("--tun2");
         else if(t === TILE.ROCKS) fill = cssVar("--rockS");
         else if(t === TILE.ROCKM) fill = cssVar("--rockM");
         else if(t === TILE.ROCKL) fill = cssVar("--rockL");
@@ -2561,72 +2603,95 @@
       }
     }
 
-    renderPheromones(x0,y0,x1,y1);
+    renderPheromonesWrapped(viewMinX, y0, viewMaxX, y1);
 
+    // Draw plants with wrapping
     for(const p of plants){
-      const s = worldToScreen(p.x, SURFACE_WALK_Y);
-      if(p.kind==="grass"){
-        ctx.fillStyle = "rgba(90,210,120,0.9)";
-        ctx.fillRect(s.sx+camera.scale*0.35, s.sy+camera.scale*0.15, camera.scale*0.30, camera.scale*0.70);
-      } else {
-        ctx.fillStyle = "rgba(120,100,70,0.9)";
-        ctx.fillRect(s.sx+camera.scale*0.40, s.sy+camera.scale*0.10, camera.scale*0.20, camera.scale*0.80);
+      for(let wrapOffset = -W; wrapOffset <= W; wrapOffset += W) {
+        const s = worldToScreen(p.x + wrapOffset, SURFACE_WALK_Y);
+        if(s.sx < -camera.scale*2 || s.sx > innerWidth + camera.scale*2) continue;
+        if(p.kind==="grass"){
+          ctx.fillStyle = "rgba(90,210,120,0.9)";
+          ctx.fillRect(s.sx+camera.scale*0.35, s.sy+camera.scale*0.15, camera.scale*0.30, camera.scale*0.70);
+        } else {
+          ctx.fillStyle = "rgba(120,100,70,0.9)";
+          ctx.fillRect(s.sx+camera.scale*0.40, s.sy+camera.scale*0.10, camera.scale*0.20, camera.scale*0.80);
+        }
       }
     }
 
     ctx.textBaseline = "middle";
     ctx.textAlign = "center";
     ctx.font = `${Math.max(10, camera.scale*0.9)}px ui-monospace, monospace`;
+    
+    // Draw resources with wrapping
     for(const r of resources){
       if(r.dead) continue;
-      const s = worldToScreen(r.x, r.y);
-      ctx.fillStyle = resColor(r);
-      let a = 0.95;
-      if(r.kind === "dirt" && r.locked) a = clamp(0.35 + r.mass*0.10, 0.35, 0.90);
-      ctx.globalAlpha = a;
-      ctx.fillText(resChar(r), s.sx + camera.scale*0.5, s.sy + camera.scale*0.55);
-      ctx.globalAlpha = 1;
+      for(let wrapOffset = -W; wrapOffset <= W; wrapOffset += W) {
+        const s = worldToScreen(r.x + wrapOffset, r.y);
+        if(s.sx < -camera.scale*2 || s.sx > innerWidth + camera.scale*2) continue;
+        ctx.fillStyle = resColor(r);
+        let a = 0.95;
+        if(r.kind === "dirt" && r.locked) a = clamp(0.35 + r.mass*0.10, 0.35, 0.90);
+        ctx.globalAlpha = a;
+        ctx.fillText(resChar(r), s.sx + camera.scale*0.5, s.sy + camera.scale*0.55);
+        ctx.globalAlpha = 1;
+      }
     }
 
+    // Draw mobs with wrapping
     for(const m of mobs){
       if(m.dead) continue;
       if(m.type==="beetle"){
-        const s = worldToScreen(m.x, m.y);
-        ctx.fillStyle = "rgb(210,210,210)";
-        ctx.fillText(SPR.beetle, s.sx + camera.scale*0.5, s.sy + camera.scale*0.55);
+        for(let wrapOffset = -W; wrapOffset <= W; wrapOffset += W) {
+          const s = worldToScreen(m.x + wrapOffset, m.y);
+          if(s.sx < -camera.scale*2 || s.sx > innerWidth + camera.scale*2) continue;
+          ctx.fillStyle = "rgb(210,210,210)";
+          ctx.fillText(SPR.beetle, s.sx + camera.scale*0.5, s.sy + camera.scale*0.55);
+        }
       } else if(m.type==="worm"){
         ctx.fillStyle = "rgb(210,210,255)";
         for(let i=m.seg.length-1;i>=0;i--){
           const seg = m.seg[i];
-          const s = worldToScreen(seg.x, seg.y);
-          const ch = (i===0) ? "@" : "#";
-          ctx.globalAlpha = (i===0) ? 1 : 0.55;
-          ctx.fillText(ch, s.sx + camera.scale*0.5, s.sy + camera.scale*0.55);
+          for(let wrapOffset = -W; wrapOffset <= W; wrapOffset += W) {
+            const s = worldToScreen(seg.x + wrapOffset, seg.y);
+            if(s.sx < -camera.scale*2 || s.sx > innerWidth + camera.scale*2) continue;
+            const ch = (i===0) ? "@" : "#";
+            ctx.globalAlpha = (i===0) ? 1 : 0.55;
+            ctx.fillText(ch, s.sx + camera.scale*0.5, s.sy + camera.scale*0.55);
+          }
         }
         ctx.globalAlpha = 1;
       } else if(m.type==="beetleEgg"){
         if(isNight()){
-          const s = worldToScreen(m.x, m.y);
-          ctx.globalAlpha = 0.65;
-          ctx.fillStyle = "rgba(210,210,230,0.65)";
-          ctx.fillText(".", s.sx + camera.scale*0.5, s.sy + camera.scale*0.55);
-          ctx.globalAlpha = 1;
+          for(let wrapOffset = -W; wrapOffset <= W; wrapOffset += W) {
+            const s = worldToScreen(m.x + wrapOffset, m.y);
+            if(s.sx < -camera.scale*2 || s.sx > innerWidth + camera.scale*2) continue;
+            ctx.globalAlpha = 0.65;
+            ctx.fillStyle = "rgba(210,210,230,0.65)";
+            ctx.fillText(".", s.sx + camera.scale*0.5, s.sy + camera.scale*0.55);
+            ctx.globalAlpha = 1;
+          }
         }
       }
     }
 
+    // Draw ants with wrapping
     for(const a of ants){
       if(a.hp<=0) continue;
-      const s = worldToScreen(a.x, a.y);
-      ctx.fillStyle = (a.team===TEAM.ORANGE) ? cssVar("--orange") : cssVar("--cyan");
-      let text = antSprite(a);
-      if(a.carried){
-        const r = resources.find(rr => rr.id===a.carried && !rr.dead);
-        if(r) text = resChar(r) + text;
-      } else if(a.caste===CASTE.WORKER && a.role===ROLE.SCOUT){
-        text = "^" + text;
+      for(let wrapOffset = -W; wrapOffset <= W; wrapOffset += W) {
+        const s = worldToScreen(a.x + wrapOffset, a.y);
+        if(s.sx < -camera.scale*2 || s.sx > innerWidth + camera.scale*2) continue;
+        ctx.fillStyle = (a.team===TEAM.ORANGE) ? cssVar("--orange") : cssVar("--cyan");
+        let text = antSprite(a);
+        if(a.carried){
+          const r = resources.find(rr => rr.id===a.carried && !rr.dead);
+          if(r) text = resChar(r) + text;
+        } else if(a.caste===CASTE.WORKER && a.role===ROLE.SCOUT){
+          text = "^" + text;
+        }
+        ctx.fillText(text, s.sx + camera.scale*0.5, s.sy + camera.scale*0.55);
       }
-      ctx.fillText(text, s.sx + camera.scale*0.5, s.sy + camera.scale*0.55);
     }
 
     drawEndOverlay();
