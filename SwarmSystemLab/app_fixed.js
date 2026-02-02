@@ -288,28 +288,20 @@
         const togglePop = (id) => {
           const el = document.getElementById(id);
           if(!el) return;
-          el.addEventListener('change', async () => {
-            if((id === 'chkAllowOrange' || id === 'chkAllowCyan') && !el.checked){
-              const teamName = id === 'chkAllowOrange' ? 'Orange' : 'Cyan';
-              const ok = await showConfirm('Remove ' + teamName + ' colony?', 'This will remove all ants from the ' + teamName + ' colony and cannot be undone. Proceed?');
-              if(!ok){ el.checked = true; updateBadgeFor(id); saveToggles(); return; }
-              else {
-                const removeAnts = (pred) => { for(let i=ants.length-1;i>=0;i--) if(pred(ants[i])) ants.splice(i,1); };
-                if(id === 'chkAllowOrange') { removeAnts(a => a.team === TEAM.ORANGE); colonies[TEAM.ORANGE].queenId = -1; }
-                if(id === 'chkAllowCyan') { removeAnts(a => a.team === TEAM.CYAN); colonies[TEAM.CYAN].queenId = -1; }
-              }
-            } else {
-              if(!el.checked){
-                const removeMobs = (pred) => { for(let i=mobs.length-1;i>=0;i--) if(pred(mobs[i])) mobs.splice(i,1); };
-                if(id === 'chkAllowMealworm') removeMobs(m => m.type === 'mealworm');
-                if(id === 'chkAllowBeetle') removeMobs(m => (m.type === 'beetle' || m.type === 'beetleEgg'));
-                if(id === 'chkAllowWorm') removeMobs(m => m.type === 'worm');
-                if(id === 'chkAllowSpider') removeMobs(m => m.type === 'spider');
-              }
+
+          el.addEventListener('click', async (e) => {
+            e.preventDefault(); // Prevent the checkbox from changing state immediately
+
+            const isChecked = el.checked;
+            const populationName = el.parentElement.textContent.trim().split(' ')[0];
+            const action = !isChecked ? 'enable' : 'disable';
+
+            const ok = await showConfirm(`Confirm ${action}`, `Are you sure you want to ${action} ${populationName}?`);
+
+            if (ok) {
+              applyToggleState(id, !isChecked);
+              saveToggles();
             }
-            updateBadgeFor(id);
-            saveToggles();
-            updateStatus();
           });
         };
 
