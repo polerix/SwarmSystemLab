@@ -260,81 +260,9 @@
   <div class="srow" id="s_beetle"><span class="dot beetle"></span><span id="st_beetle">Beetles: ...</span></div>
 </div>
 
-<div id="menuBtn">Menu</div>
 
-<div id="menu">
-  <div id="menuHeader">
-    <div class="t">Swarm System Lab Simulator</div>
-    <div class="x" id="menuClose">Close</div>
-  </div>
-  <div id="menuBody">
-    <div class="row"><label>Base pheromone half-life</label><input id="rngPh" type="range" min="4" max="24" step="1" value="14"><span class="pill" id="valPh">14s</span></div>
-    <div class="row"><label>Solar intensity</label><input id="rngSolar" type="range" min="20" max="120" step="5" value="60"><span class="pill" id="valSolar">60%</span></div>
-    <div class="row"><label>Zoom sensitivity</label><input id="rngZoom" type="range" min="0.5" max="2.0" step="0.1" value="1.2"><span class="pill" id="valZoom">1.2x</span></div>
 
-    <div class="sep"></div>
 
-    <div class="row"><label>Show status lines</label>
-      <span>
-        <label style="margin-right:6px;"><input id="chkSO" type="checkbox" checked>O</label>
-        <label style="margin-right:6px;"><input id="chkSC" type="checkbox" checked>C</label>
-        <label style="margin-right:6px;"><input id="chkSW" type="checkbox" checked>W</label>
-        <label><input id="chkSB" type="checkbox" checked>B</label>
-      </span>
-    </div>
-
-    <div class="row"><label>Music</label>
-      <span>
-        <label style="margin-right:6px;"><input id="chkMusic" type="checkbox">On</label>
-        <span class="pill">default off</span>
-      </span>
-    </div>
-
-    <div class="sep"></div>
-
-    <div class="row">
-      <button id="btnDropFood">Drop Food Pack</button>
-      <button id="btnReset">Reset</button>
-      <button id="btnCenter">Center</button>
-    </div>
-
-    <div class="sep"></div>
-
-    <div class="labBox">
-      <div class="row">
-        <label>Balance Lab</label>
-        <span>
-          <label style="margin-right:6px;"><input id="chkLab" type="checkbox">On</label>
-          <span class="pill">auto-tune</span>
-        </span>
-      </div>
-      <div class="row">
-        <label>Iterations</label>
-        <input id="rngLabIters" type="range" min="1" max="5" step="1" value="3">
-        <span class="pill" id="valLabIters">3</span>
-      </div>
-      <div class="row">
-        <button id="btnRunLab">Run Lab</button>
-        <button id="btnCopyLab" class="small">Copy Lab Code</button>
-        <button id="btnCopyEnd" class="small">Copy End Code</button>
-      </div>
-      <div class="mono" id="labOut">Lab code: (none yet)</div>
-      <div class="mono" id="labParams">Tuning: (none)</div>
-    </div>
-
-    <details style="margin-top:10px;">
-      <summary>Hint</summary>
-      <div class="hint">
-        - Scrollwheel zooms. Drag to pan.<br>
-        - Keyboard: press D to drop a food pack.<br>
-        - Leaves are substrate only (cut and haul). Ants do not eat leaves.<br>
-        - Scouts keep the surface loop alive even when the pantry is full.<br>
-        - Diggers carry dirt to the surface to build a mound.<br>
-        - Balance Lab tries a few parameter sets and applies the best on Reset when enabled.<br>
-      </div>
-    </details>
-  </div>
-</div>
 
 
 <div id="unifiedPanel">
