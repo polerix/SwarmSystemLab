@@ -1,128 +1,269 @@
 <!doctype html>
 <html lang="en">
+
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Swarm System Lab Simulator - Rebuild + Balance Lab</title>
   <style>
-    :root{
-      --bg:#05060a;
+    :root {
+      --bg: #05060a;
 
-      --panel:#0c1020ee;
-      --text:#e8ecff;
-      --muted:#aab4ff;
+      --panel: #0c1020ee;
+      --text: #e8ecff;
+      --muted: #aab4ff;
 
-      --soil1:#2a1b12;
-      --soil2:#22160f;
-      --tun1:#0a0f14;
-      --tun2:#071018;
+      --soil1: #2a1b12;
+      --soil2: #22160f;
+      --tun1: #0a0f14;
+      --tun2: #071018;
 
-      --rockS:#3a3a43;
-      --rockM:#2f2f38;
-      --rockL:#23232b;
+      --rockS: #3a3a43;
+      --rockM: #2f2f38;
+      --rockL: #23232b;
 
-      --orange:#ff8a3c;
-      --cyan:#4de2ff;
+      --orange: #ff8a3c;
+      --cyan: #4de2ff;
 
       /* solid colors, opacity handled in renderer */
-      --phHome: rgb(120,170,255);
-      --phFood: rgb(120,255,170);
-      --phDanger: rgb(255,120,150);
+      --phHome: rgb(120, 170, 255);
+      --phFood: rgb(120, 255, 170);
+      --phDanger: rgb(255, 120, 150);
 
-      --leaf: rgb(84,190,110);
-      --protein: rgb(255,210,130);
-      --spore: rgb(160,255,220);
-      --dirt: rgb(150,105,70);
+      --leaf: rgb(84, 190, 110);
+      --protein: rgb(255, 210, 130);
+      --spore: rgb(160, 255, 220);
+      --dirt: rgb(150, 105, 70);
     }
 
-    html,body{
-      height:100%;
-      margin:0;
-      background:var(--bg);
-      overflow:hidden;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono","Courier New", monospace;
+    html,
+    body {
+      height: 100%;
+      margin: 0;
+      background: var(--bg);
+      overflow: hidden;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     }
-    #c{ position:fixed; inset:0; display:block; }
+
+    #c {
+      position: fixed;
+      inset: 0;
+      display: block;
+    }
 
     /* Status bar */
-    #status{
-      position:fixed; left:0; right:0; top:0;
-      padding:6px 10px;
-      background:linear-gradient(to bottom, rgba(12,16,32,0.92), rgba(12,16,32,0.65));
-      color:var(--text);
-      font-size:12px;
-      line-height:1.2;
-      user-select:none;
-      border-bottom:1px solid rgba(160,180,255,0.14);
-      z-index:10;
+    #status {
+      position: fixed;
+      left: 0;
+      right: 0;
+      top: 0;
+      padding: 6px 10px;
+      background: linear-gradient(to bottom, rgba(12, 16, 32, 0.92), rgba(12, 16, 32, 0.65));
+      color: var(--text);
+      font-size: 12px;
+      line-height: 1.2;
+      user-select: none;
+      border-bottom: 1px solid rgba(160, 180, 255, 0.14);
+      z-index: 10;
     }
-    .srow{display:flex;gap:10px;align-items:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-    .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;transform:translateY(1px)}
-    .dot.orange{background:var(--orange)}
-    .dot.cyan{background:var(--cyan)}
-    .dot.worm{background:#d7d7ff}
-    .dot.beetle{background:#c7c7c7}
-    .pill{padding:1px 6px;border:1px solid rgba(160,180,255,0.2);border-radius:999px;color:var(--muted)}
-    .good{color:#7dff86}
-    .bad{color:#ff5c7a}
-    .warn{color:#ffcc66}
+
+    .srow {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      margin-right: 6px;
+      transform: translateY(1px)
+    }
+
+    .dot.orange {
+      background: var(--orange)
+    }
+
+    .dot.cyan {
+      background: var(--cyan)
+    }
+
+    .dot.worm {
+      background: #d7d7ff
+    }
+
+    .dot.beetle {
+      background: #c7c7c7
+    }
+
+    .pill {
+      padding: 1px 6px;
+      border: 1px solid rgba(160, 180, 255, 0.2);
+      border-radius: 999px;
+      color: var(--muted)
+    }
+
+    .good {
+      color: #7dff86
+    }
+
+    .bad {
+      color: #ff5c7a
+    }
+
+    .warn {
+      color: #ffcc66
+    }
 
     /* Menu */
-    #menuBtn{
-      position:fixed; left:8px; top:58px;
-      z-index:11;
-      padding:6px 10px;
-      border:1px solid rgba(160,180,255,0.25);
-      background:rgba(10,13,23,0.86);
-      color:var(--text);
-      border-radius:10px;
-      cursor:pointer;
-      user-select:none;
+    #menuBtn {
+      position: fixed;
+      left: 8px;
+      top: 58px;
+      z-index: 11;
+      padding: 6px 10px;
+      border: 1px solid rgba(160, 180, 255, 0.25);
+      background: rgba(10, 13, 23, 0.86);
+      color: var(--text);
+      border-radius: 10px;
+      cursor: pointer;
+      user-select: none;
     }
-    #menuBtn:hover{border-color:rgba(160,180,255,0.45)}
-    #menu{
-      position:fixed; left:8px; top:96px; width:360px;
-      z-index:12;
-      background:var(--panel);
-      border:1px solid rgba(160,180,255,0.25);
-      border-radius:14px;
-      box-shadow:0 10px 30px rgba(0,0,0,0.4);
-      color:var(--text);
-      display:none;
-      user-select:none;
+
+    #menuBtn:hover {
+      border-color: rgba(160, 180, 255, 0.45)
     }
-    #menuHeader{
-      padding:10px 12px;
-      border-bottom:1px solid rgba(160,180,255,0.18);
-      display:flex;justify-content:space-between;align-items:center;
-      cursor:grab;
+
+    #menu {
+      position: fixed;
+      left: 8px;
+      top: 96px;
+      width: 360px;
+      z-index: 12;
+      background: var(--panel);
+      border: 1px solid rgba(160, 180, 255, 0.25);
+      border-radius: 14px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+      color: var(--text);
+      display: none;
+      user-select: none;
     }
-    #menuHeader .t{font-weight:700;letter-spacing:0.3px}
-    #menuHeader .x{padding:2px 8px;border-radius:10px;border:1px solid rgba(160,180,255,0.22);background:rgba(0,0,0,0.18);cursor:pointer}
-    #menuHeader .x:hover{border-color:rgba(160,180,255,0.45)}
-    #menuBody{padding:10px 12px;font-size:12px;}
-    .row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:6px 0;}
-    .row label{color:var(--muted)}
-    input[type="range"]{width:190px}
-    input[type="checkbox"]{transform:translateY(1px)}
-    button{
-      font-family:inherit;font-size:12px;
-      color:var(--text);
-      background:rgba(0,0,0,0.18);
-      border:1px solid rgba(160,180,255,0.22);
-      border-radius:10px;
-      padding:6px 10px;
-      cursor:pointer;
+
+    #menuHeader {
+      padding: 10px 12px;
+      border-bottom: 1px solid rgba(160, 180, 255, 0.18);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      cursor: grab;
     }
-    button:hover{border-color:rgba(160,180,255,0.45)}
-    button.small{padding:4px 8px;border-radius:9px}
-    .sep{height:1px;background:rgba(160,180,255,0.14);margin:10px 0;}
-    details{border:1px solid rgba(160,180,255,0.16);border-radius:12px;padding:8px 10px;background:rgba(0,0,0,0.12)}
-    details summary{cursor:pointer;color:var(--muted)}
-    .hint{color:var(--muted);line-height:1.35;margin-top:6px}
-    .mono{font-family:inherit; font-size:11px; color:rgba(232,236,255,0.92); white-space:pre-wrap; word-break:break-word}
-    .labBox{border:1px solid rgba(160,180,255,0.16); border-radius:12px; padding:8px 10px; background:rgba(0,0,0,0.12)}
-  
+
+    #menuHeader .t {
+      font-weight: 700;
+      letter-spacing: 0.3px
+    }
+
+    #menuHeader .x {
+      padding: 2px 8px;
+      border-radius: 10px;
+      border: 1px solid rgba(160, 180, 255, 0.22);
+      background: rgba(0, 0, 0, 0.18);
+      cursor: pointer
+    }
+
+    #menuHeader .x:hover {
+      border-color: rgba(160, 180, 255, 0.45)
+    }
+
+    #menuBody {
+      padding: 10px 12px;
+      font-size: 12px;
+    }
+
+    .row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin: 6px 0;
+    }
+
+    .row label {
+      color: var(--muted)
+    }
+
+    input[type="range"] {
+      width: 190px
+    }
+
+    input[type="checkbox"] {
+      transform: translateY(1px)
+    }
+
+    button {
+      font-family: inherit;
+      font-size: 12px;
+      color: var(--text);
+      background: rgba(0, 0, 0, 0.18);
+      border: 1px solid rgba(160, 180, 255, 0.22);
+      border-radius: 10px;
+      padding: 6px 10px;
+      cursor: pointer;
+    }
+
+    button:hover {
+      border-color: rgba(160, 180, 255, 0.45)
+    }
+
+    button.small {
+      padding: 4px 8px;
+      border-radius: 9px
+    }
+
+    .sep {
+      height: 1px;
+      background: rgba(160, 180, 255, 0.14);
+      margin: 10px 0;
+    }
+
+    details {
+      border: 1px solid rgba(160, 180, 255, 0.16);
+      border-radius: 12px;
+      padding: 8px 10px;
+      background: rgba(0, 0, 0, 0.12)
+    }
+
+    details summary {
+      cursor: pointer;
+      color: var(--muted)
+    }
+
+    .hint {
+      color: var(--muted);
+      line-height: 1.35;
+      margin-top: 6px
+    }
+
+    .mono {
+      font-family: inherit;
+      font-size: 11px;
+      color: rgba(232, 236, 255, 0.92);
+      white-space: pre-wrap;
+      word-break: break-word
+    }
+
+    .labBox {
+      border: 1px solid rgba(160, 180, 255, 0.16);
+      border-radius: 12px;
+      padding: 8px 10px;
+      background: rgba(0, 0, 0, 0.12)
+    }
+
     /* Unified Panel Styles */
     #unifiedPanel {
       position: fixed;
@@ -145,44 +286,51 @@
     }
 
     /* Collapsible "orb" mode for mobile: panel can collapse into a circle */
-    #unifiedPanel.is-collapsed{
-      width:56px;
-      height:56px;
-      max-height:56px;
-      border-radius:999px;
-      overflow:hidden;
-      cursor:pointer;
+    #unifiedPanel.is-collapsed {
+      width: 56px;
+      height: 56px;
+      max-height: 56px;
+      border-radius: 999px;
+      overflow: hidden;
+      cursor: pointer;
     }
+
     #unifiedPanel.is-collapsed .tab-nav,
-    #unifiedPanel.is-collapsed .tab-content{
-      display:none !important;
+    #unifiedPanel.is-collapsed .tab-content {
+      display: none !important;
     }
-    #unifiedPanel.is-collapsed .panel-header{
-      border-bottom:none;
-      padding:0;
-      height:56px;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      background:rgba(10, 13, 23, 0.92);
+
+    #unifiedPanel.is-collapsed .panel-header {
+      border-bottom: none;
+      padding: 0;
+      height: 56px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(10, 13, 23, 0.92);
     }
-    #unifiedPanel .panel-header__actions{
-      display:flex;
-      gap:8px;
-      align-items:center;
+
+    #unifiedPanel .panel-header__actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
     }
-    #btnPanelCollapse{
-      border:none;
-      background:rgba(255,255,255,0.08);
-      color:var(--text);
-      border-radius:999px;
-      width:30px;
-      height:30px;
-      cursor:pointer;
-      font-weight:800;
-      line-height:30px;
+
+    #btnPanelCollapse {
+      border: none;
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text);
+      border-radius: 999px;
+      width: 30px;
+      height: 30px;
+      cursor: pointer;
+      font-weight: 800;
+      line-height: 30px;
     }
-    #btnPanelCollapse:hover{ background:rgba(255,255,255,0.12); }
+
+    #btnPanelCollapse:hover {
+      background: rgba(255, 255, 255, 0.12);
+    }
 
     #unifiedPanel .panel-header {
       padding: 14px 16px;
@@ -233,11 +381,21 @@
     .tab-content.active {
       display: block;
     }
-    
+
     @keyframes wiggle {
-      0%, 100% { transform: rotate(0); }
-      25% { transform: rotate(-5deg); }
-      75% { transform: rotate(5deg); }
+
+      0%,
+      100% {
+        transform: rotate(0);
+      }
+
+      25% {
+        transform: rotate(-5deg);
+      }
+
+      75% {
+        transform: rotate(5deg);
+      }
     }
 
     #unifiedPanel.is-collapsed:hover {
@@ -250,22 +408,23 @@
     }
   </script>
 </head>
+
 <body>
-<canvas id="c"></canvas>
+  <canvas id="c"></canvas>
 
-<div id="status">
-  <div class="srow" id="s_orange"><span class="dot orange"></span><span id="st_orange">Orange: ...</span></div>
-  <div class="srow" id="s_cyan"><span class="dot cyan"></span><span id="st_cyan">Cyan: ...</span></div>
-  <div class="srow" id="s_worm"><span class="dot worm"></span><span id="st_worm">Worms: ...</span></div>
-  <div class="srow" id="s_beetle"><span class="dot beetle"></span><span id="st_beetle">Beetles: ...</span></div>
-</div>
-
-
+  <div id="status">
+    <div class="srow" id="s_orange"><span class="dot orange"></span><span id="st_orange">Orange: ...</span></div>
+    <div class="srow" id="s_cyan"><span class="dot cyan"></span><span id="st_cyan">Cyan: ...</span></div>
+    <div class="srow" id="s_worm"><span class="dot worm"></span><span id="st_worm">Worms: ...</span></div>
+    <div class="srow" id="s_beetle"><span class="dot beetle"></span><span id="st_beetle">Beetles: ...</span></div>
+  </div>
 
 
 
 
-<div id="unifiedPanel">
+
+
+  <div id="unifiedPanel">
     <div class="panel-header">
       <span>Swarm System Lab</span>
       <span class="panel-header__actions">
@@ -273,24 +432,53 @@
       </span>
     </div>
     <div class="tab-nav">
-      <button class="tab-btn active" data-tab="status">Status</button>
+      <button class="tab-btn active" data-tab="controls">Controls</button>
+      <button class="tab-btn" data-tab="status">Status</button>
       <button class="tab-btn" data-tab="population">Population</button>
-      <button class="tab-btn" data-tab="item">Item Drop</button>
-      <button class="tab-btn" data-tab="troubleshoot">Troubleshooting</button>
-      <button class="tab-btn" data-tab="sound">Sound</button>
+      <button class="tab-btn" data-tab="lab">Lab</button>
+      <button class="tab-btn" data-tab="info">Info</button>
     </div>
 
     <!-- Tab: Controls -->
     <div class="tab-content active" id="tab_controls">
       <h3>Simulation Controls</h3>
-      <!-- Content migrated via JS or manually placed here later -->
-      <div id="controlsContainer"></div>
+      <div id="controlsContainer" style="display:flex;flex-direction:column;gap:8px;">
+        <div class="row">
+          <button id="btnDropFood">Drop Food (D)</button>
+          <button id="btnReset">Reset (R)</button>
+        </div>
+        <div class="sep"></div>
+        <div class="row">
+          <label>Zoom</label>
+          <input id="rngZoom" type="range" min="0.6" max="4.0" step="0.01" value="1.4" />
+          <span id="valZoom" class="mono" style="width:40px;text-align:right">1.4x</span>
+        </div>
+        <div class="row">
+          <label>Show Pheromones</label>
+          <input id="chkPhero" type="checkbox" checked />
+        </div>
+        <div class="row">
+          <label>Show Debug</label>
+          <input id="chkDebug" type="checkbox" />
+        </div>
+        <div class="sep"></div>
+        <div class="row">
+          <label>Audio</label>
+          <input id="chkAudio" type="checkbox" />
+        </div>
+        <div class="row">
+          <label>Volume</label>
+          <input id="rngVol" type="range" min="0" max="1" step="0.01" value="0.35" />
+        </div>
+      </div>
     </div>
 
     <!-- Tab: Status -->
     <div class="tab-content" id="tab_status">
       <h3>Colony Status</h3>
-      <div id="statusContainer"></div>
+      <div id="statusContainer" style="display:flex;flex-direction:column;gap:6px;">
+        <!-- Status rows will be moved here by script or can be static -->
+      </div>
     </div>
 
     <!-- Tab: Population -->
@@ -299,12 +487,18 @@
       <div class="labBox">
         <div style="font-weight:700;margin-bottom:6px;">Population Types</div>
         <div class="row" style="flex-direction:column;align-items:stretch">
-          <label><input id="chkAllowMealworm" type="checkbox" checked> Mealworms <span class="badge" id="badgeAllowMealworm" style="display:none">Disabled</span></label>
-          <label><input id="chkAllowBeetle" type="checkbox" checked> Beetles <span class="badge" id="badgeAllowBeetle" style="display:none">Disabled</span></label>
-          <label><input id="chkAllowWorm" type="checkbox" checked> Earthworms <span class="badge" id="badgeAllowWorm" style="display:none">Disabled</span></label>
-          <label><input id="chkAllowSpider" type="checkbox" checked> Spiders <span class="badge" id="badgeAllowSpider" style="display:none">Disabled</span></label>
-          <label><input id="chkAllowOrange" type="checkbox" checked> Orange Ants <span class="badge" id="badgeAllowOrange" style="display:none">Disabled</span></label>
-          <label><input id="chkAllowCyan" type="checkbox" checked> Cyan Ants <span class="badge" id="badgeAllowCyan" style="display:none">Disabled</span></label>
+          <label><input id="chkAllowMealworm" type="checkbox" checked> Mealworms <span class="badge"
+              id="badgeAllowMealworm" style="display:none">Disabled</span></label>
+          <label><input id="chkAllowBeetle" type="checkbox" checked> Beetles <span class="badge" id="badgeAllowBeetle"
+              style="display:none">Disabled</span></label>
+          <label><input id="chkAllowWorm" type="checkbox" checked> Earthworms <span class="badge" id="badgeAllowWorm"
+              style="display:none">Disabled</span></label>
+          <label><input id="chkAllowSpider" type="checkbox" checked> Spiders <span class="badge" id="badgeAllowSpider"
+              style="display:none">Disabled</span></label>
+          <label><input id="chkAllowOrange" type="checkbox" checked> Orange Ants <span class="badge"
+              id="badgeAllowOrange" style="display:none">Disabled</span></label>
+          <label><input id="chkAllowCyan" type="checkbox" checked> Cyan Ants <span class="badge" id="badgeAllowCyan"
+              style="display:none">Disabled</span></label>
         </div>
         <div class="hint">Uncheck to prevent that population type from spawning (removes existing instances).</div>
       </div>
@@ -326,7 +520,30 @@
     <!-- Tab: Lab -->
     <div class="tab-content" id="tab_lab">
       <h3>Balance Lab</h3>
-      <div id="labContainer"></div>
+      <div id="labContainer">
+        <div class="row">
+          <label>Solar Intensity</label>
+          <input id="rngSolar" type="range" min="0.25" max="1.0" step="0.01" value="0.60" />
+          <span id="valSolar" class="mono" style="width:40px;text-align:right">60%</span>
+        </div>
+        <div class="row">
+          <label>Pheromone Half-life</label>
+          <input id="rngPh" type="range" min="4" max="24" step="1" value="14" />
+          <span id="valPh" class="mono" style="width:40px;text-align:right">14s</span>
+        </div>
+        <div class="row">
+          <label>Worm Smell Depth</label>
+          <input id="rngWormDepth" type="range" min="18" max="44" step="1" value="32" />
+        </div>
+      </div>
+      <div class="sep"></div>
+      <div class="small">
+        <div class="row">
+          <button id="btnCopyCode">Copy End Code</button>
+          <button id="btnCopyLab">Copy Tune Code</button>
+        </div>
+        <div class="codeBox" id="codeOut" style="display:none"></div>
+      </div>
     </div>
 
     <!-- Tab: Info -->
@@ -346,6 +563,7 @@
       </div>
     </div>
   </div>
-<script type="module" src="./app_fixed.js"></script>
+  <script type="module" src="./app_fixed.js"></script>
 </body>
+
 </html>
