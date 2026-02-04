@@ -323,65 +323,18 @@
     const sphere = document.getElementById('menuSphere');
     const btnClose = document.getElementById('btnClose');
 
-    // Drag Logic
-    let isDragging = false;
-    let startX, startY, initialLeft, initialTop;
-
-    // Load saved position
-    const savedPos = JSON.parse(localStorage.getItem('menu_pos') || 'null');
-    if (savedPos) {
-      wrapper.style.left = savedPos.x + 'px';
-      wrapper.style.top = savedPos.y + 'px';
-      wrapper.style.right = 'auto'; // clear default right
-    }
-
-    sphere.addEventListener('mousedown', (e) => {
-      // If open, don't drag from content area, only if clicking border? 
-      // Actually, let's only allow drag when closed to avoid conflict with inputs
-      if (wrapper.classList.contains('open')) return;
-
-      isDragging = true;
-      startX = e.clientX;
-      startY = e.clientY;
-      const rect = wrapper.getBoundingClientRect();
-      initialLeft = rect.left;
-      initialTop = rect.top;
-
-      // Clear right/bottom to allow specific positioning
-      wrapper.style.right = 'auto';
-      wrapper.style.bottom = 'auto';
-      wrapper.style.left = initialLeft + 'px';
-      wrapper.style.top = initialTop + 'px';
-    });
-
-    window.addEventListener('mousemove', (e) => {
-      if (!isDragging) return;
-      const dx = e.clientX - startX;
-      const dy = e.clientY - startY;
-      wrapper.style.left = (initialLeft + dx) + 'px';
-      wrapper.style.top = (initialTop + dy) + 'px';
-    });
-
-    window.addEventListener('mouseup', () => {
-      if (isDragging) {
-        isDragging = false;
-        localStorage.setItem('menu_pos', JSON.stringify({
-          x: parseInt(wrapper.style.left),
-          y: parseInt(wrapper.style.top)
-        }));
-      }
-    });
+    // Orb is auto-moving only (sun/moon). Dragging is disabled.
+    const isDragging = false;
 
     // Toggle Open/Close
-    // We check if it was a drag or a click
-    let wasDrag = false;
+    // (auto-moving only: no drag detection)
 
     // Make the menu sphere act as sun/moon indicator + move across screen
-    // (keeps menu functionality; it auto-moves when CLOSED)
+    // Auto-moving only: user cannot drag it.
     function tickOrb() {
       try {
         const t = window.SWARM_TIME;
-        if (t && !wrapper.classList.contains('open') && !isDragging) {
+        if (t && !wrapper.classList.contains('open')) {
           const pad = 20;
           const x = pad + (innerWidth - pad * 2) * t.dayPhase;
           const y = pad + 30 + (1 - t.dayT) * 40;
@@ -396,10 +349,8 @@
       requestAnimationFrame(tickOrb);
     }
     requestAnimationFrame(tickOrb);
-    sphere.addEventListener('mousemove', () => { if (isDragging) wasDrag = true; });
-    sphere.addEventListener('mousedown', () => { wasDrag = false; });
+
     sphere.addEventListener('click', (e) => {
-      if (wasDrag) return;
       // Don't close if clicking inside menu content
       if (e.target.closest('.menu-content')) return;
       wrapper.classList.add('open');
