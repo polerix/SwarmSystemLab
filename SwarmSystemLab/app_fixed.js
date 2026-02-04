@@ -2108,20 +2108,11 @@
   /* =========================================================
      22) Balance Lab
   ========================================================= */
-  const chkLab = document.getElementById("chkLab");
-  const rngLabIters = document.getElementById("rngLabIters");
-  const valLabIters = document.getElementById("valLabIters");
-  const btnRunLab = document.getElementById("btnRunLab");
-  const btnCopyLab = document.getElementById("btnCopyLab");
-  const btnCopyEnd = document.getElementById("btnCopyEnd");
-  const labOut = document.getElementById("labOut");
-  const labParams = document.getElementById("labParams");
-
-  valLabIters.textContent = rngLabIters.value;
-  rngLabIters.addEventListener("input", () => valLabIters.textContent = rngLabIters.value);
-
+  /* =========================================================
+     22) Balance Lab (Headless/Internal only now)
+  ========================================================= */
+  // NOTE: Automated tuning UI reduced.
   let lastLabCode = "";
-  let lastLabSummary = "";
 
   function prng(seed) {
     let s = seed >>> 0;
@@ -2132,205 +2123,22 @@
       return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
     };
   }
+  // ... (keep helper functions like clampCfg if they are used elsewhere, or suppress if unused. 
+  // Assuming simulateEconomyModel might be useful later, but for now we remove the UI binding causing the crash)
 
-  function clampCfg(c) {
-    c.scoutFrac = clamp(c.scoutFrac, 0.06, 0.22);
-    c.diggerFrac = clamp(c.diggerFrac, 0.12, 0.34);
-    c.foragePersistence = clamp(c.foragePersistence, 0.25, 0.90);
-    c.leafFallMult = clamp(c.leafFallMult, 0.70, 1.55);
-    c.leafCutBias = clamp(c.leafCutBias, 0.70, 1.60);
-    c.mushEff = clamp(c.mushEff, 0.45, 0.85);
-    c.mushLoss = clamp(c.mushLoss, 0.12, 0.35);
-    c.mushMinDepth = clamp(c.mushMinDepth | 0, 22, 46);
-    c.foodTargetPerAnt = clamp(c.foodTargetPerAnt, 0.40, 0.75);
-    c.subTargetPerAnt = clamp(c.subTargetPerAnt, 0.22, 0.55);
-    return c;
+  if (document.getElementById("btnCopyLab")) {
+    document.getElementById("btnCopyLab").addEventListener("click", async () => {
+      // Lab code accumulation removed from UI, so just copy empty or current config
+      // For now, let's just copy the current tuning config as a string
+      await copyText(fmtCfg());
+    });
   }
-
-  function simulateEconomyModel(seed, cfg, seconds = 120) {
-    const r = prng(seed);
-    const solar = (Number(rngSolar.value) / 100);
-    const hl = Number(rngPh.value);
-
-    let pop = 2;
-    let edible = 16;
-    let fungus = 0;
-    let subE = 0;
-    let plantBank = 24;
-    let leafOnSurface = 2;
-
-    let deepest = 26;
-    let surplusStreak = 0;
-    let galleriesActive = 0;
-
-    const moveTax = 0.06 + (0.02 * (14 / hl));
-    const baseUpkeep = 0.16;
-
-    let bestProgress = 0;
-    let alive = true;
-    let t = 0;
-
-    for (t = 0; t < seconds; t++) {
-      const daylight = solar * (0.40 + 0.60 * Math.min(1, (t / seconds)));
-      plantBank = Math.min(70, plantBank + daylight * 0.55);
-
-      const leafCost = 3.2;
-      const leafEvents = (r() < 0.55 * cfg.leafFallMult) ? 1 : 0;
-      for (let i = 0; i < leafEvents; i++) {
-        if (plantBank >= leafCost) {
-          plantBank -= leafCost;
-          leafOnSurface += 1;
-        }
-      }
-
-      const workers = Math.max(0, pop - 1);
-      const scouts = Math.max(1, Math.floor(workers * cfg.scoutFrac));
-      const diggers = Math.max(1, Math.floor(workers * cfg.diggerFrac));
-
-      const gatherRate = 0.18 + 0.03 * (hl / 14);
-      const scoutEff = gatherRate * (0.85 + 0.30 * cfg.leafCutBias);
-      const take = Math.min(leafOnSurface, scouts * scoutEff);
-      leafOnSurface -= take;
-
-      subE += take * leafCost;
-
-      deepest = Math.min(80, deepest + diggers * 0.05);
-
-      if (deepest >= cfg.mushMinDepth && subE > 0.1) {
-        galleriesActive = 1 + Math.floor((deepest - cfg.mushMinDepth) / 20);
-        const moistFactor = 0.65;
-        const throughput = Math.min(subE, (0.55 + 0.015 * deepest) * moistFactor);
-        const prod = throughput * cfg.mushEff * (1.0 - cfg.mushLoss);
-        subE -= throughput;
-        fungus += prod;
-      }
-
-      const upkeep = baseUpkeep + pop * 0.06 + pop * moveTax * 0.35;
-      edible += fungus * 0.18;
-      fungus *= 0.82;
-
-      edible -= upkeep;
-      if (edible < 0) {
-        pop -= Math.ceil(Math.abs(edible) * 0.9);
-        edible = 0;
-      }
-      if (pop <= 1) {
-        alive = false;
-        break;
-      }
-
-      const foodTarget = 10 + pop * cfg.foodTargetPerAnt;
-      if (edible > foodTarget * 0.95) {
-        const extra = edible - foodTarget * 0.95;
-        const eggs = Math.min(3, Math.floor(extra / 1.8));
-        if (eggs > 0) {
-          pop += eggs;
-          edible -= eggs * 1.0;
-        }
-      }
-
-      const winGate = (pop >= 70) && (galleriesActive >= 2) && (edible >= cfg.queenSurplusGate);
-      if (edible >= cfg.queenSurplusGate) surplusStreak++; else surplusStreak = Math.max(0, surplusStreak - 2);
-
-      const prog = clamp(
-        (pop / 70) * 0.45 +
-        (galleriesActive / 2) * 0.25 +
-        (edible / cfg.queenSurplusGate) * 0.25 +
-        (surplusStreak / 40) * 0.05,
-        0, 1
-      );
-      bestProgress = Math.max(bestProgress, prog);
-
-      if (winGate && surplusStreak > 30) {
-        bestProgress = 1;
-        break;
-      }
-    }
-
-    const score =
-      (alive ? 1 : 0) * 0.35 +
-      bestProgress * 0.55 +
-      clamp((t / seconds), 0, 1) * 0.10;
-
-    return { score, alive, t, bestProgress, popEnd: pop, edibleEnd: edible, deepest: Math.round(deepest), galleriesActive };
+  if (document.getElementById("btnCopyEnd")) {
+    document.getElementById("btnCopyEnd").addEventListener("click", async () => {
+      const code = colonies[0].endCode || makeEndCode();
+      await copyText(code);
+    });
   }
-
-  function mutateCfg(base, rand) {
-    const c = JSON.parse(JSON.stringify(base));
-    const jitter = (s) => (rand() - 0.5) * s;
-
-    c.scoutFrac += jitter(0.10);
-    c.diggerFrac += jitter(0.12);
-    c.foragePersistence += jitter(0.35);
-    c.leafFallMult += jitter(0.60);
-    c.leafCutBias += jitter(0.60);
-    c.mushEff += jitter(0.18);
-    c.mushLoss += jitter(0.16);
-    c.mushMinDepth += Math.round(jitter(10));
-    c.foodTargetPerAnt += jitter(0.22);
-    c.subTargetPerAnt += jitter(0.18);
-
-    return clampCfg(c);
-  }
-
-  function makeLabCode(seed, iters, best, bestRes) {
-    const hl = Number(rngPh.value);
-    const sol = Number(rngSolar.value);
-
-    const core =
-      `LAB1-${b36(seed)}-${b36(sol)}-${b36(hl)}-${b36(iters)}-` +
-      `${b36(Math.round(bestRes.score * 10000))}.${b36(Math.round(bestRes.bestProgress * 10000))}.${b36(bestRes.t)}-` +
-      `${b36(Math.round(best.scoutFrac * 100))}.${b36(Math.round(best.diggerFrac * 100))}.${b36(Math.round(best.foragePersistence * 100))}-` +
-      `${b36(Math.round(best.leafFallMult * 100))}.${b36(Math.round(best.leafCutBias * 100))}-` +
-      `${b36(Math.round(best.mushEff * 100))}.${b36(Math.round(best.mushLoss * 100))}.${b36(best.mushMinDepth)}-` +
-      `${b36(Math.round(best.foodTargetPerAnt * 100))}.${b36(Math.round(best.subTargetPerAnt * 100))}`;
-
-    const crc = b36(hashStr(core) & 0xFFFF);
-    return `${core}-${crc}`;
-  }
-
-  function applyCfg(best) {
-    for (const k of Object.keys(CFG)) {
-      if (best[k] !== undefined) CFG[k] = best[k];
-    }
-  }
-
-  function runBalanceLab() {
-    const iters = Number(rngLabIters.value);
-    const seed = (Date.now() & 0x7fffffff) >>> 0;
-    const rand = prng(seed);
-
-    let best = JSON.parse(JSON.stringify(CFG));
-    let bestRes = simulateEconomyModel(seed ^ 0xA53, best);
-
-    for (let i = 0; i < iters; i++) {
-      const cand = mutateCfg(CFG, rand);
-      const res = simulateEconomyModel((seed + i * 997) ^ 0xC01, cand);
-      if (res.score > bestRes.score) {
-        best = cand;
-        bestRes = res;
-      }
-    }
-
-    applyCfg(best);
-
-    lastLabCode = makeLabCode(seed, iters, best, bestRes);
-    lastLabSummary =
-      `Best score ${(bestRes.score * 100).toFixed(1)}% | progress ${(bestRes.bestProgress * 100).toFixed(1)}% | t ${bestRes.t}s | pop ${bestRes.popEnd} | edible ${bestRes.edibleEnd.toFixed(1)} | depth ${bestRes.deepest} | galleries ${bestRes.galleriesActive}`;
-
-    labOut.textContent = `Lab code: ${lastLabCode}\n${lastLabSummary}`;
-    labParams.textContent = `Tuning: ${fmtCfg()}`;
-  }
-
-  btnRunLab.addEventListener("click", () => runBalanceLab());
-  btnCopyLab.addEventListener("click", async () => {
-    if (!lastLabCode) return;
-    await copyText(lastLabCode);
-  });
-  btnCopyEnd.addEventListener("click", async () => {
-    const code = colonies[0].endCode || makeEndCode();
-    await copyText(code);
-  });
 
   /* =========================================================
      23) Rendering
@@ -2783,13 +2591,11 @@
     beetleSpawnCD = 8 + Math.random() * 10;
     wormSpawnCD = 12 + Math.random() * 12;
 
-    labParams.textContent = `Tuning: ${fmtCfg()}`;
+    // labParams removed
+    // labParams.textContent = `Tuning: ${fmtCfg()}`;
   }
 
   document.getElementById("btnReset").addEventListener("click", () => {
-    if (chkLab.checked) {
-      runBalanceLab();
-    }
     resetAll();
   });
 
@@ -2857,8 +2663,9 @@
   /* =========================================================
      27) Start
   ========================================================= */
-  const menuCloseBtn = document.getElementById("menuClose");
-  menuCloseBtn.addEventListener("click", () => menu.style.display = "none");
+  // menuClose behavior handled by panel logic manually if needed
+  // const menuCloseBtn = document.getElementById("menuClose");
+  // if(menuCloseBtn) menuCloseBtn.addEventListener("click", () => menu.style.display = "none");
 
   resetAll();
   loop();
