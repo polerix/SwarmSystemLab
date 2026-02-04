@@ -161,6 +161,75 @@
   ];
 
   /* =========================================================
+     Diagnostic Tracking
+  ========================================================= */
+  const diag = {
+    // Rolling window accumulators (reset every N seconds)
+    windowSec: 5,
+    timer: 0,
+    // Per-window counters
+    foodGathered: 0,
+    foodConsumed: 0,
+    tunnelsDug: 0,
+    antDeaths: 0,
+    antDeathsByPredator: 0,
+    stuckMoves: 0,
+    totalMoves: 0,
+    // Snapshot values (computed at window end)
+    foodPressure: 0,      // positive = deficit
+    tunnelRate: 0,
+    predationRate: 0,
+    pathingFail: 0,       // fraction of stuck moves
+    verdict: 'Colony stable.'
+  };
+
+  function diagReset() {
+    diag.foodGathered = 0;
+    diag.foodConsumed = 0;
+    diag.tunnelsDug = 0;
+    diag.antDeaths = 0;
+    diag.antDeathsByPredator = 0;
+    diag.stuckMoves = 0;
+    diag.totalMoves = 0;
+  }
+
+  function diagCompute() {
+    // Food pressure: consumed - gathered (higher = worse)
+    diag.foodPressure = diag.foodConsumed - diag.foodGathered;
+
+    // Tunnel rate per second
+    diag.tunnelRate = diag.tunnelsDug / diag.windowSec;
+
+    // Predation: deaths by predator / total deaths (0-1)
+    diag.predationRate = diag.antDeaths > 0 ? diag.antDeathsByPredator / diag.antDeaths : 0;
+
+    // Pathing fail: stuck / total moves
+    diag.pathingFail = diag.totalMoves > 0 ? diag.stuckMoves / diag.totalMoves : 0;
+
+    // Generate verdict
+    const issues = [];
+    if (diag.foodPressure > 5) issues.push('Food deficit: ants starving faster than foraging.');
+    if (diag.tunnelRate < 0.5 && ants.length > 10) issues.push('Low dig rate: expansion stalled.');
+    if (diag.predationRate > 0.5) issues.push('High predation: mobs are decimating the colony.');
+    if (diag.pathingFail > 0.4) issues.push('Pathing issues: ants frequently blocked.');
+
+    if (issues.length === 0) {
+      diag.verdict = 'Colony stable.';
+    } else {
+      diag.verdict = issues.join(' ');
+    }
+  }
+
+  function diagTick(dt) {
+    diag.timer += dt;
+    if (diag.timer >= diag.windowSec) {
+      diag.timer = 0;
+      diagCompute();
+      diagReset();
+    }
+  }
+
+  /* =========================================================
      4) Simulation Logic
   ========================================================= */
   function wrappedDist(x1, y1, x2, y2) {
@@ -247,11 +316,16 @@
       }
 
       a.e -= dt * 0.5;
-      if (a.e <= 0) a.hp -= dt * 2;
+      if (a.e <= 0) {
+        a.hp -= dt * 2;
+        diag.foodConsumed += dt * 0.1; // proxy for starvation drain
+      }
       if (a.hp <= 0) a.dead = true;
     }
     for (let i = ants.length - 1; i >= 0; i--) {
       if (ants[i].dead) {
+        diag.antDeaths++;
+        if (ants[i]._killedByMob) diag.antDeathsByPredator++;
         addRes('protein', ants[i].x, ants[i].y);
         ants.splice(i, 1);
       }
@@ -300,7 +374,11 @@
     } else if (isSoil(nx, ny) && Math.random() < 0.1) {
       setTile(nx, ny, TILE.TUNNEL);
       addRes('dirt', nx, ny);
+      diag.tunnelsDug++;
+    } else {
+      diag.stuckMoves++;
     }
+    diag.totalMoves++;
 
     if (!a.carried) {
       for (let i = 0; i < resources.length; i++) {
@@ -319,6 +397,7 @@
         if (a.carried.kind === 'leaf' || a.carried.kind === 'protein') {
           const idx = resources.indexOf(a.carried);
           if (idx > -1) resources.splice(idx, 1); // consumed
+          diag.foodGathered++;
         }
         a.carried = null;
       } else {
@@ -343,7 +422,10 @@
       if (m.type === 'worm' && isSoil(nx, ny)) setTile(nx, ny, TILE.TUNNEL);
     }
     for (const a of ants) {
-      if (a.x === m.x && a.y === m.y) a.hp -= 20;
+      if (a.x === m.x && a.y === m.y) {
+        a.hp -= 20;
+        a._killedByMob = true;
+      }
     }
   }
 
@@ -525,6 +607,19 @@
       const el = document.getElementById(id);
       if (el) el.textContent = lMap[id];
     }
+
+    // Diagnostic UI
+    const diagFood = document.getElementById('diag_food');
+    const diagTunnel = document.getElementById('diag_tunnel');
+    const diagPredation = document.getElementById('diag_predation');
+    const diagPathing = document.getElementById('diag_pathing');
+    const diagVerdict = document.getElementById('diag_verdict');
+
+    if (diagFood) diagFood.textContent = diag.foodPressure > 0 ? `+${diag.foodPressure.toFixed(1)} deficit` : `${diag.foodPressure.toFixed(1)} surplus`;
+    if (diagTunnel) diagTunnel.textContent = `${diag.tunnelRate.toFixed(1)}/s`;
+    if (diagPredation) diagPredation.textContent = `${(diag.predationRate * 100).toFixed(0)}%`;
+    if (diagPathing) diagPathing.textContent = `${(diag.pathingFail * 100).toFixed(0)}% blocked`;
+    if (diagVerdict) diagVerdict.textContent = diag.verdict;
   }
 
   /* =========================================================
@@ -539,6 +634,7 @@
       checkToggles();
       tickSimulation(dt);
       autoBalance(dt);
+      diagTick(dt);
       draw();
       updateUI();
     } catch (e) {
