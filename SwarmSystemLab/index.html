@@ -144,6 +144,7 @@
     cursor: pointer;
     font-size: 13px;
     transition: all 0.2s;
+    color: var(--text); /* force white text */
   }
 
   .tab.active {
@@ -281,6 +282,10 @@
             <span>Leaves 🍃</span>
             <label class="switch"><input type="checkbox" id="chk_leaf" checked><span class="slider"></span></label>
           </div>
+          <div class="setting-row">
+            <span>Trees 🌳</span>
+            <label class="switch"><input type="checkbox" id="chk_tree" checked><span class="slider"></span></label>
+          </div>
         </div>
 
         <!-- TAB: SOUND -->
@@ -397,7 +402,7 @@
     // Toggles -> Window.SWARM_FLAGS
     const inputs = [
       'chk_mealworm', 'chk_beetle', 'chk_worm', 'chk_spider',
-      'chk_ant_orange', 'chk_ant_cyan', 'chk_leaf', 'chk_sound_on'
+      'chk_ant_orange', 'chk_ant_cyan', 'chk_leaf', 'chk_tree', 'chk_sound_on'
     ];
 
     // Wait for script to populate window.SWARM_FLAGS or poll
@@ -412,6 +417,7 @@
         'chk_ant_orange': 'ant_orange',
         'chk_ant_cyan': 'ant_cyan',
         'chk_leaf': 'leaf',
+        'chk_tree': 'tree',
         'chk_sound_on': 'sound_on'
       };
 

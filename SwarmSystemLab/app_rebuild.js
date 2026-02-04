@@ -1,6 +1,7 @@
 /*
   app_rebuild.js
   Rebuilt Swarm System Lab with Emoji assets, Liquid Glass UI support, and Self-Balancing logic.
+  Now with Sky/Sun/Clouds and Tree system (leaves + apples that drop).
 */
 
 (() => {
@@ -12,6 +13,7 @@
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const irand = (a, b) => a + ((Math.random() * (b - a + 1)) | 0);
   const choice = (arr) => arr[(Math.random() * arr.length) | 0];
+  const lerp = (a, b, t) => a + (b - a) * t;
 
   /* =========================================================
      1) Configuration & Toggles
@@ -28,7 +30,8 @@
     protein: true,
     spore: true,
     sound_on: false,
-    volume: 0.35
+    volume: 0.35,
+    tree: true  // New toggle for trees
   };
 
   // Expose toggles
@@ -145,6 +148,8 @@
     WORM: '🪱',
     SPIDER: '🕷️',
     LEAF: '🍃',
+    APPLE: '🍎',
+    TREE: '🌳',
     MUSHROOM: '🍄',
     PROTEIN: '🍖',
     SPORE: '🦠'
@@ -201,6 +206,15 @@
       workerCount: 0
     }
   ];
+
+  // Trees live on the surface and drop leaves + apples.
+  const trees = [];
+
+  // Sky elements
+  const sky = {
+    t: 0,
+    clouds: []
+  };
 
   /* =========================================================
      Diagnostic Tracking
@@ -274,6 +288,9 @@
   /* =========================================================
      4) Simulation Logic
   ========================================================= */
+  // Ninantic-ish worker lifecycle states
+  const ANT_STATE = { DIG: 0, FORAGE: 1, CARRY: 2, FEED: 3 };
+
   function wrappedDist(x1, y1, x2, y2) {
     let dx = Math.abs(wrapX(x1) - wrapX(x2));
     dx = Math.min(dx, W - dx);
@@ -295,9 +312,9 @@
       life: 2000 + Math.random() * 500,
       target: null  // {x, y} for pathfinding goals
     };
-    
-    if (caste === CASTE.QUEEN) { 
-      a.hpMax = 5000; a.hp = 5000; a.life = 999999; 
+
+    if (caste === CASTE.QUEEN) {
+      a.hpMax = 5000; a.hp = 5000; a.life = 999999;
     } else if (caste === CASTE.EGG) {
       a.hp = 50; a.hpMax = 50;
       a.hatchTime = 8 + Math.random() * 4; // seconds to hatch
@@ -309,7 +326,7 @@
       a.hp = 100; a.hpMax = 100; a.life = 1500 + Math.random() * 500;
       a.role = ROLE.IDLE;
     }
-    
+
     ants.push(a);
     return a;
   }
@@ -321,8 +338,21 @@
     mobs.push(m);
   }
 
-  function addRes(kind, x, y) {
-    resources.push({ id: nextId++, kind, x: wrapX(x), y, amt: 10, dead: false });
+  function addRes(kind, x, y, opts = null) {
+    const r = {
+      id: nextId++,
+      kind,
+      x: wrapX(x),
+      y,
+      amt: 10,
+      dead: false,
+      carried: false,
+      vy: 0,
+      falling: false
+    };
+    if (opts) Object.assign(r, opts);
+    resources.push(r);
+    return r;
   }
 
   // --- SPAWNERS & TOGGLES ---
@@ -336,6 +366,7 @@
     if (!PLAY_FLAGS.ant_cyan) killColony(1);
 
     if (!PLAY_FLAGS.leaf) removeRes('leaf');
+    if (!PLAY_FLAGS.tree) { removeRes('apple'); /* leaves may still spawn via background if leaf on */ }
   }
 
   function removeMobs(pred) {
@@ -380,10 +411,34 @@
   }
 
   // --- AI LOGIC ---
+  // Ninantic-ish workers:
+  //  (1) dig to explore, (2) bring back food, (3) feed queen until they die of old age.
   function tickSimulation(dt) {
-    // 1. Ants
+    // 0) Sky time + clouds
+    sky.t += dt;
+    tickClouds(dt);
+
+    // 0b) Queen hunger/food store
+    for (const col of colonies) {
+      // Queens consume colony food; if it hits 0, queen starts losing hp.
+      col.foodStore = Math.max(0, col.foodStore - dt * 0.9);
+      const q = ants.find(a => a.id === col.queenId);
+      if (q) {
+        if (col.foodStore <= 0.01) q.hp -= dt * 6;
+        else q.hp = Math.min(q.hpMax, q.hp + dt * 1.5);
+      }
+    }
+
+    // 0c) Trees grow & drop
+    if (PLAY_FLAGS.tree) tickTrees(dt);
+
+    // 1) Ants
     for (const a of ants) {
       if (a.hp <= 0) continue;
+
+      // Aging
+      a.age += dt;
+      if (a.age > a.life) { a.dead = true; continue; }
 
       a.moveT += dt;
       if (a.moveT > 0.15) {
@@ -407,7 +462,7 @@
       }
     }
 
-    // 2. Mobs
+    // 2) Mobs
     for (const m of mobs) {
       if (m.hp <= 0) continue;
       m.moveT += dt;
@@ -424,15 +479,18 @@
       }
     }
 
-    // 3. Spawners
-    if (Math.random() < 0.05) {
-      if (PLAY_FLAGS.leaf && Math.random() < 0.4) {
+    // 3) Background spawners (kept light; trees handle most leaf/apple drops)
+    if (Math.random() < 0.035) {
+      if (PLAY_FLAGS.leaf && !PLAY_FLAGS.tree && Math.random() < 0.5) {
         addRes('leaf', irand(0, W), SURFACE_WALK_Y);
       }
       if (PLAY_FLAGS.beetle && Math.random() < 0.03) spawnMob('beetle', irand(0, W), SURFACE_WALK_Y);
       if (PLAY_FLAGS.spider && Math.random() < 0.015) spawnMob('spider', irand(0, W), SURFACE_WALK_Y);
       if (PLAY_FLAGS.worm && Math.random() < 0.01) spawnMob('worm', irand(0, W), irand(surfaceY + 10, H - 10));
     }
+
+    // 4) Simple physics for falling resources
+    tickFallingResources(dt);
   }
 
   function stepAnt(a) {
@@ -515,15 +573,20 @@
       moveToward(a, c.homeX, c.homeY);
       if (wrappedDist(a.x, a.y, c.homeX, c.homeY) < 3) {
         // Deliver food
-        if (a.carriedKind === 'leaf' || a.carriedKind === 'protein') {
+        if (a.carriedKind === 'leaf' || a.carriedKind === 'apple' || a.carriedKind === 'protein') {
           c.foodStore += 5;
           diag.foodGathered++;
         }
         dropCarried(a);
       }
+    }
+
+    // Decide state
+    if (a.carried) {
+      a.state = ANT_STATE.CARRY;
     } else {
-      // Look for food on surface or nearby
-      const food = findNearestResource(a, ['leaf', 'protein']);
+      // Look for food on surface or nearby (nanitics forage)
+      const food = findNearestResource(a, ['leaf', 'apple', 'protein']);
       if (food) {
         moveToward(a, food.x, food.y);
         if (a.x === food.x && a.y === food.y) {
@@ -539,6 +602,7 @@
         }
       }
     }
+
   }
 
   function stepWorker(a, c) {
@@ -560,7 +624,7 @@
       if (a.carried) {
         moveToward(a, c.homeX, c.homeY);
         if (wrappedDist(a.x, a.y, c.homeX, c.homeY) < 3) {
-          if (a.carriedKind === 'leaf' || a.carriedKind === 'protein') {
+          if (a.carriedKind === 'leaf' || a.carriedKind === 'apple' || a.carriedKind === 'protein') {
             c.foodStore += 5;
             diag.foodGathered++;
           }
@@ -568,7 +632,7 @@
           a.role = ROLE.IDLE;
         }
       } else {
-        const food = findNearestResource(a, ['leaf', 'protein']);
+        const food = findNearestResource(a, ['leaf', 'apple', 'protein']);
         if (food) {
           moveToward(a, food.x, food.y);
           if (a.x === food.x && a.y === food.y) pickUp(a, food);
@@ -743,6 +807,123 @@
     }
   }
 
+  /* =========================================================
+     4b) Trees, falling resources, and sky helpers
+  ========================================================= */
+  function initSkyAndTrees() {
+    // Clouds
+    sky.clouds.length = 0;
+    const n = 10;
+    for (let i = 0; i < n; i++) {
+      sky.clouds.push({
+        x: Math.random() * W,
+        y: 6 + Math.random() * (surfaceY - 10),
+        r: 14 + Math.random() * 22,
+        a: 0.08 + Math.random() * 0.16,
+        vx: (0.6 + Math.random() * 1.2) * (Math.random() < 0.5 ? -1 : 1)
+      });
+    }
+
+    // Trees
+    trees.length = 0;
+    const treeCount = 8;
+    for (let i = 0; i < treeCount; i++) {
+      trees.push({
+        x: (i + 0.5) * (W / treeCount) + irand(-6, 6),
+        y: SURFACE_WALK_Y,
+        leafTimer: 2 + Math.random() * 5,
+        appleTimer: 6 + Math.random() * 10
+      });
+    }
+  }
+
+  function tickClouds(dt) {
+    for (const c of sky.clouds) {
+      c.x = wrapX(c.x + c.vx * dt);
+      // gentle bob
+      c.y += Math.sin((sky.t * 0.35) + c.x * 0.1) * dt * 0.2;
+      c.y = clamp(c.y, 3, Math.max(3, surfaceY - 6));
+    }
+  }
+
+  function tickTrees(dt) {
+    for (const tr of trees) {
+      tr.leafTimer -= dt;
+      tr.appleTimer -= dt;
+
+      if (tr.leafTimer <= 0) {
+        tr.leafTimer = 1.6 + Math.random() * 4.5;
+        // spawn a falling leaf above the tree
+        addRes('leaf', tr.x + irand(-1, 1), tr.y - 2, { falling: true, vy: 0 });
+      }
+      if (tr.appleTimer <= 0) {
+        tr.appleTimer = 5.0 + Math.random() * 10.0;
+        // spawn a falling apple (food)
+        addRes('apple', tr.x + irand(-1, 1), tr.y - 3, { falling: true, vy: 0 });
+      }
+    }
+  }
+
+  function tickFallingResources(dt) {
+    for (const r of resources) {
+      if (r.carried) continue;
+      // Anything above surface may fall if flagged
+      if (r.falling) {
+        r.vy += dt * 28; // gravity
+        r.y += r.vy * dt;
+        if (r.y >= SURFACE_WALK_Y) {
+          r.y = SURFACE_WALK_Y;
+          r.falling = false;
+          r.vy = 0;
+        }
+      }
+    }
+  }
+
+  function drawSky() {
+    // Sky occupies everything above the surface line in screen space.
+    const surf = worldToScreen(camera.x, SURFACE_WALK_Y).sy;
+    const skyBottom = clamp(surf + camera.scale, 0, innerHeight);
+
+    // day/night cycle
+    const dayT = (Math.sin(sky.t * 0.08) * 0.5 + 0.5); // 0..1
+    const topCol = `rgb(${Math.floor(lerp(6, 38, dayT))},${Math.floor(lerp(9, 86, dayT))},${Math.floor(lerp(18, 140, dayT))})`;
+    const botCol = `rgb(${Math.floor(lerp(3, 120, dayT))},${Math.floor(lerp(4, 170, dayT))},${Math.floor(lerp(10, 210, dayT))})`;
+
+    const grad = ctx.createLinearGradient(0, 0, 0, skyBottom);
+    grad.addColorStop(0, topCol);
+    grad.addColorStop(1, botCol);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, innerWidth, skyBottom);
+
+    // Sun
+    const sunXw = wrapX(W * (0.1 + 0.8 * ((sky.t * 0.01) % 1)));
+    const sunYw = 8 + (1 - dayT) * 10;
+    const s = worldToScreen(sunXw, sunYw);
+    const sunR = 10 + 12 * dayT;
+    ctx.globalAlpha = 0.55 * dayT;
+    ctx.fillStyle = "#ffd26a";
+    ctx.beginPath();
+    ctx.arc(s.sx, s.sy, sunR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    // Clouds (simple circles)
+    for (const cl of sky.clouds) {
+      const ss = worldToScreen(cl.x, cl.y);
+      if (ss.sy < -60 || ss.sy > skyBottom + 60) continue;
+      if (ss.sx < -200 || ss.sx > innerWidth + 200) continue;
+      ctx.globalAlpha = cl.a;
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.arc(ss.sx, ss.sy, cl.r, 0, Math.PI * 2);
+      ctx.arc(ss.sx + cl.r * 0.9, ss.sy + cl.r * 0.1, cl.r * 0.7, 0, Math.PI * 2);
+      ctx.arc(ss.sx - cl.r * 0.8, ss.sy + cl.r * 0.15, cl.r * 0.6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+  }
+
   // --- AUTO BALANCE ---
   let balanceTimer = 0;
   function autoBalance(dt) {
@@ -788,19 +969,21 @@
     for (let x = 0; x < W; x += 4) {
       if (Math.random() < 0.5) plants.push({ x, e: 10, bloom: 0 });
     }
+
+    initSkyAndTrees();
   }
 
   /* =========================================================
      5) Rendering with Emojis
   ========================================================= */
   function draw() {
-    // Clear screen
+    // Sky + background
+    drawSky();
+    // Fill below the visible sky (ground/backdrop)
+    const surf = worldToScreen(camera.x, SURFACE_WALK_Y).sy;
+    const skyBottom = clamp(surf + camera.scale, 0, innerHeight);
     ctx.fillStyle = "#05060a";
-    ctx.fillRect(0, 0, innerWidth, innerHeight); // This assumes identity transform or consistent?
-    // Wait! ctx.fillRect uses context logical units. 
-    // With setTransform in resize, 1 unit = 1 logical pixel.
-    // But innerWidth is logical pixels. So if DPR=2, rect is correct logical size.
-    // And we scaled up by DPR, so this fills canvas. Correct.
+    ctx.fillRect(0, skyBottom, innerWidth, innerHeight - skyBottom);
 
     // Debug: Check Camera
     if (isNaN(camera.x) || isNaN(camera.y)) {
@@ -847,6 +1030,15 @@
     ctx.textBaseline = "middle";
     ctx.font = `${Math.floor(camera.scale * 1.5)}px sans-serif`;
 
+    // Trees
+    loopDraw((off) => {
+      for (const tr of trees) {
+        const s = worldToScreen(tr.x + off, tr.y);
+        if (s.sx >= -80 && s.sx <= innerWidth + 80) ctx.fillText(EMOJI.TREE, s.sx, s.sy - camera.scale * 0.9);
+      }
+    });
+
+    // Small plants
     loopDraw((off) => {
       for (const p of plants) {
         const s = worldToScreen(p.x + off, SURFACE_WALK_Y);
@@ -905,6 +1097,7 @@
         if (s.sx < -50 || s.sx > innerWidth + 50) continue;
         let char = "?";
         if (r.kind === 'leaf') char = EMOJI.LEAF;
+        else if (r.kind === 'apple') char = EMOJI.APPLE;
         else if (r.kind === 'protein') char = EMOJI.PROTEIN;
         else if (r.kind === 'mushroom') char = EMOJI.MUSHROOM;
         else if (r.kind === 'spore') char = EMOJI.SPORE;
