@@ -15,6 +15,11 @@
   const choice = (arr) => arr[(Math.random() * arr.length) | 0];
   const lerp = (a, b, t) => a + (b - a) * t;
 
+  // Time scale: 1 in-game day = 30 minutes real-time
+  const DAY_SEC = 30 * 60;
+  const WEEK_SEC = 7 * DAY_SEC;
+  const MONTH_SEC = 30 * DAY_SEC;
+
   /* =========================================================
      1) Configuration & Toggles
   ========================================================= */
@@ -338,6 +343,15 @@
     mobs.push(m);
   }
 
+  function baseFoodFor(kind) {
+    if (kind === 'apple') return 10;
+    if (kind === 'leaf') return 6;
+    if (kind === 'protein') return 12;
+    if (kind === 'mushroom') return 4;
+    if (kind === 'spore') return 1;
+    return 0;
+  }
+
   function addRes(kind, x, y, opts = null) {
     const r = {
       id: nextId++,
@@ -348,7 +362,10 @@
       dead: false,
       carried: false,
       vy: 0,
-      falling: false
+      falling: false,
+      bornT: sky.t || 0,
+      baseFood: baseFoodFor(kind),
+      food: baseFoodFor(kind)
     };
     if (opts) Object.assign(r, opts);
     resources.push(r);
@@ -431,6 +448,9 @@
 
     // 0c) Trees grow & drop
     if (PLAY_FLAGS.tree) tickTrees(dt);
+
+    // 0d) Food decay / rot / drying
+    decayFood(dt);
 
     // 1) Ants
     for (const a of ants) {
@@ -777,7 +797,7 @@
     r.x = a.x;
     r.y = a.y;
     // If food, remove from world (consumed)
-    if (r.kind === 'leaf' || r.kind === 'protein') {
+    if (r.kind === 'leaf' || r.kind === 'apple' || r.kind === 'protein') {
       const idx = resources.indexOf(r);
       if (idx > -1) resources.splice(idx, 1);
     }
@@ -828,11 +848,14 @@
     trees.length = 0;
     const treeCount = 8;
     for (let i = 0; i < treeCount; i++) {
+      const x = (i + 0.5) * (W / treeCount) + irand(-6, 6);
       trees.push({
-        x: (i + 0.5) * (W / treeCount) + irand(-6, 6),
+        x,
         y: SURFACE_WALK_Y,
         leafTimer: 2 + Math.random() * 5,
-        appleTimer: 6 + Math.random() * 10
+        pollinatedUntilT: 0,
+        appleWindowEndT: 0,
+        nextAppleT: 0
       });
     }
   }
@@ -846,21 +869,89 @@
     }
   }
 
-  function tickTrees(dt) {
-    for (const tr of trees) {
-      tr.leafTimer -= dt;
-      tr.appleTimer -= dt;
+  function treeHasPollination(tr) {
+    return (sky.t < (tr.pollinatedUntilT || 0)) && (sky.t < (tr.appleWindowEndT || 0));
+  }
 
+  function tickTrees(dt) {
+    // Pollination: ants, beetles, spiders visiting tree. Worms/mealworms do not count.
+    for (const tr of trees) {
+      // Check visitors near the tree (surface only)
+      let pollinatorNear = false;
+      for (const a of ants) {
+        if (a.hp <= 0) continue;
+        if (a.y !== SURFACE_WALK_Y) continue;
+        if (wrappedDist(a.x, a.y, tr.x, tr.y) <= 2) { pollinatorNear = true; break; }
+      }
+      if (!pollinatorNear) {
+        for (const m of mobs) {
+          if (m.type !== 'beetle' && m.type !== 'spider') continue;
+          if (m.y !== SURFACE_WALK_Y) continue;
+          if (wrappedDist(m.x, m.y, tr.x, tr.y) <= 2) { pollinatorNear = true; break; }
+        }
+      }
+
+      if (pollinatorNear) {
+        // Keep pollinated for 7 days; apple window extends 30 days from last pollination.
+        tr.pollinatedUntilT = sky.t + 7 * DAY_SEC;
+        tr.appleWindowEndT = sky.t + MONTH_SEC;
+        if (!tr.nextAppleT || tr.nextAppleT < sky.t) tr.nextAppleT = sky.t + WEEK_SEC;
+      }
+
+      // Leaves: always drop
+      tr.leafTimer -= dt;
       if (tr.leafTimer <= 0) {
         tr.leafTimer = 1.6 + Math.random() * 4.5;
-        // spawn a falling leaf above the tree
         addRes('leaf', tr.x + irand(-1, 1), tr.y - 2, { falling: true, vy: 0 });
       }
-      if (tr.appleTimer <= 0) {
-        tr.appleTimer = 5.0 + Math.random() * 10.0;
-        // spawn a falling apple (food)
-        addRes('apple', tr.x + irand(-1, 1), tr.y - 3, { falling: true, vy: 0 });
+
+      // Apples: only if pollinated + in window; weekly
+      if (treeHasPollination(tr)) {
+        if (!tr.nextAppleT) tr.nextAppleT = sky.t + WEEK_SEC;
+        if (sky.t >= tr.nextAppleT) {
+          tr.nextAppleT = sky.t + WEEK_SEC;
+          addRes('apple', tr.x + irand(-1, 1), tr.y - 3, { falling: true, vy: 0 });
+        }
       }
+    }
+  }
+
+  function decayFood(dt) {
+    for (const r of resources) {
+      if (r.dead) continue;
+      if (r.kind === 'dirt') continue;
+
+      const ageSec = (sky.t - (r.bornT || 0));
+      const ageDays = ageSec / DAY_SEC;
+
+      // Defaults: slow decay
+      let food = r.baseFood;
+
+      if (r.kind === 'apple') {
+        // Rot in 3 days (linear -> 0)
+        const t = clamp(ageDays / 3, 0, 1);
+        food = r.baseFood * (1 - t);
+      } else if (r.kind === 'leaf') {
+        // Dry in 4 days: treat as "fresh" until day 4, then steep decay after.
+        if (ageDays < 4) {
+          food = r.baseFood * (1 - 0.25 * (ageDays / 4));
+        } else {
+          const t = clamp((ageDays - 4) / 6, 0, 1); // 6 more days to near-zero
+          food = lerp(r.baseFood * 0.75, 0, t);
+        }
+      } else if (r.kind === 'protein') {
+        // Protein decays but slower
+        const t = clamp(ageDays / 6, 0, 1);
+        food = r.baseFood * (1 - 0.6 * t);
+      }
+
+      r.food = Math.max(0, food);
+      // Auto-delete when worthless (keeps counts stable)
+      if (r.food <= 0.05 && ageDays > 3) r.dead = true;
+    }
+    // Cull dead
+    for (let i = resources.length - 1; i >= 0; i--) {
+      if (resources[i].dead) resources.splice(i, 1);
     }
   }
 
@@ -885,8 +976,9 @@
     const surf = worldToScreen(camera.x, SURFACE_WALK_Y).sy;
     const skyBottom = clamp(surf + camera.scale, 0, innerHeight);
 
-    // day/night cycle
-    const dayT = (Math.sin(sky.t * 0.08) * 0.5 + 0.5); // 0..1
+    // day/night cycle (1 day = 30 minutes)
+    const dayPhase = (sky.t / DAY_SEC) % 1; // 0..1
+    const dayT = (Math.sin(dayPhase * Math.PI * 2 - Math.PI / 2) * 0.5 + 0.5); // 0..1
     const topCol = `rgb(${Math.floor(lerp(6, 38, dayT))},${Math.floor(lerp(9, 86, dayT))},${Math.floor(lerp(18, 140, dayT))})`;
     const botCol = `rgb(${Math.floor(lerp(3, 120, dayT))},${Math.floor(lerp(4, 170, dayT))},${Math.floor(lerp(10, 210, dayT))})`;
 
@@ -896,17 +988,27 @@
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, innerWidth, skyBottom);
 
-    // Sun
-    const sunXw = wrapX(W * (0.1 + 0.8 * ((sky.t * 0.01) % 1)));
-    const sunYw = 8 + (1 - dayT) * 10;
-    const s = worldToScreen(sunXw, sunYw);
-    const sunR = 10 + 12 * dayT;
-    ctx.globalAlpha = 0.55 * dayT;
-    ctx.fillStyle = "#ffd26a";
+    // Sun / Moon across the sky
+    const orbXw = wrapX(W * (0.1 + 0.8 * dayPhase));
+    const orbYw = 8 + (1 - dayT) * 10;
+    const s = worldToScreen(orbXw, orbYw);
+    const orbR = 10 + 12 * Math.max(0.2, dayT);
+
+    const isDay = dayT > 0.35;
+    ctx.globalAlpha = isDay ? (0.55 * dayT) : 0.22;
+    ctx.fillStyle = isDay ? "#ffd26a" : "#cfe2ff";
     ctx.beginPath();
-    ctx.arc(s.sx, s.sy, sunR, 0, Math.PI * 2);
+    ctx.arc(s.sx, s.sy, orbR, 0, Math.PI * 2);
     ctx.fill();
     ctx.globalAlpha = 1;
+
+    // Expose time to UI (menu orb)
+    window.SWARM_TIME = {
+      dayPhase,
+      dayT,
+      isDay,
+      light: { x: s.sx, y: s.sy }
+    };
 
     // Clouds (simple circles)
     for (const cl of sky.clouds) {

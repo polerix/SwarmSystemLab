@@ -375,6 +375,27 @@
     // Toggle Open/Close
     // We check if it was a drag or a click
     let wasDrag = false;
+
+    // Make the menu sphere act as sun/moon indicator + move across screen
+    // (keeps menu functionality; it auto-moves when CLOSED)
+    function tickOrb() {
+      try {
+        const t = window.SWARM_TIME;
+        if (t && !wrapper.classList.contains('open') && !isDragging) {
+          const pad = 20;
+          const x = pad + (innerWidth - pad * 2) * t.dayPhase;
+          const y = pad + 30 + (1 - t.dayT) * 40;
+          wrapper.style.left = x + 'px';
+          wrapper.style.top = y + 'px';
+          wrapper.style.right = 'auto';
+        }
+        // Set icon
+        const icon = sphere.querySelector('span');
+        if (icon && t) icon.textContent = t.isDay ? '☀️' : '🌙';
+      } catch (e) {}
+      requestAnimationFrame(tickOrb);
+    }
+    requestAnimationFrame(tickOrb);
     sphere.addEventListener('mousemove', () => { if (isDragging) wasDrag = true; });
     sphere.addEventListener('mousedown', () => { wasDrag = false; });
     sphere.addEventListener('click', (e) => {
