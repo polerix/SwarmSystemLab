@@ -266,6 +266,7 @@
           <div class="tab active" data-tab="play">Play</div>
           <div class="tab" data-tab="sound">Sound</div>
           <div class="tab" data-tab="status">Status</div>
+          <div class="tab" data-tab="stats">Stats</div>
         </div>
 
         <!-- TAB: PLAY -->
@@ -322,6 +323,7 @@
           <div class="stat-row"><span>Orange Colony</span> <span id="stat_orange">0</span></div>
           <div class="stat-row"><span>Cyan Colony</span> <span id="stat_cyan">0</span></div>
           <div class="stat-row"><span>Beetles</span> <span id="stat_beetle">0</span></div>
+          <div class="stat-row"><span>Mealworms</span> <span id="stat_mealworm">0</span></div>
           <div class="stat-row"><span>Worms</span> <span id="stat_worm">0</span></div>
           <div style="border-top:1px solid var(--glass-border);margin:12px 0 8px;padding-top:10px;font-size:11px;color:var(--highlight);text-transform:uppercase;letter-spacing:0.05em">Diagnostics</div>
           <div class="stat-row" style="color:#ff9c5c"><span>🍖 Food Pressure</span> <span id="diag_food">—</span></div>
@@ -329,6 +331,16 @@
           <div class="stat-row" style="color:#ff5c7a"><span>💀 Predation</span> <span id="diag_predation">—</span></div>
           <div class="stat-row" style="color:#c4b5fd"><span>🧭 Pathing</span> <span id="diag_pathing">—</span></div>
           <div id="diag_verdict" style="margin-top:10px;padding:8px 10px;border-radius:8px;background:rgba(255,255,255,0.04);font-size:12px;line-height:1.35;color:var(--text)">Colony stable.</div>
+        </div>
+
+        <!-- TAB: STATS -->
+        <div class="tab-panel" id="tab_stats">
+          <div style="font-size:11px;color:var(--highlight);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px">Cosmic clockwork</div>
+          <div class="stat-row"><span>Phase</span> <span id="stat_phase">—</span></div>
+          <div class="stat-row"><span>Time</span> <span id="stat_time">—</span></div>
+          <div class="stat-row"><span>Day frac</span> <span id="stat_dayfrac">—</span></div>
+          <div style="border-top:1px solid var(--glass-border);margin:12px 0 8px;padding-top:10px;font-size:11px;color:var(--highlight);text-transform:uppercase;letter-spacing:0.05em">Colonies</div>
+          <div id="stat_colonies" style="font-family:monospace;font-size:12px;line-height:1.3;white-space:pre-wrap;opacity:0.95">—</div>
         </div>
       </div>
     </div>
@@ -346,18 +358,49 @@
     // Toggle Open/Close
     // (auto-moving only: no drag detection)
 
+    const PAD = 20;
+
+    function clampWrapperToViewport() {
+      // Ensures orb/menu stays >=20px from edges and fully visible when open.
+      const isOpen = wrapper.classList.contains('open');
+      const rect = wrapper.getBoundingClientRect();
+      const w = rect.width;
+      const h = rect.height;
+
+      // wrapper uses left/top when positioned
+      let left = rect.left;
+      let top = rect.top;
+
+      // Clamp to viewport with padding
+      left = Math.max(PAD, Math.min(left, innerWidth - PAD - w));
+      top = Math.max(PAD, Math.min(top, innerHeight - PAD - h));
+
+      wrapper.style.left = Math.round(left) + 'px';
+      wrapper.style.top = Math.round(top) + 'px';
+      wrapper.style.right = 'auto';
+
+      // If open and still off due to min-height/animation, run once more next frame
+      if (isOpen) requestAnimationFrame(() => {
+        const r2 = wrapper.getBoundingClientRect();
+        if (r2.right > innerWidth - PAD + 0.5 || r2.bottom > innerHeight - PAD + 0.5) {
+          clampWrapperToViewport();
+        }
+      });
+    }
+
     // Make the menu sphere act as sun/moon indicator + move across screen
     // Auto-moving only: user cannot drag it.
     function tickOrb() {
       try {
         const t = window.SWARM_TIME;
         if (t && !wrapper.classList.contains('open')) {
-          const pad = 20;
-          const x = pad + (innerWidth - pad * 2) * t.dayPhase;
-          const y = pad + 30 + (1 - t.dayT) * 40;
-          wrapper.style.left = x + 'px';
-          wrapper.style.top = y + 'px';
+          const orbSize = 60;
+          const x = PAD + (innerWidth - PAD * 2 - orbSize) * t.dayPhase;
+          const y = PAD + 30 + (1 - t.dayT) * 40;
+          wrapper.style.left = Math.round(x) + 'px';
+          wrapper.style.top = Math.round(y) + 'px';
           wrapper.style.right = 'auto';
+          clampWrapperToViewport();
         }
         // Set icon
         const icon = sphere.querySelector('span');
@@ -367,15 +410,22 @@
     }
     requestAnimationFrame(tickOrb);
 
+    addEventListener('resize', () => clampWrapperToViewport());
+
     sphere.addEventListener('click', (e) => {
       // Don't close if clicking inside menu content
       if (e.target.closest('.menu-content')) return;
       wrapper.classList.add('open');
+      // Ensure the opened menu stays fully visible + padded
+      setTimeout(clampWrapperToViewport, 0);
+      setTimeout(clampWrapperToViewport, 250);
     });
 
     btnClose.addEventListener('click', (e) => {
       e.stopPropagation();
       wrapper.classList.remove('open');
+      // When closing, re-clamp the orb position
+      setTimeout(clampWrapperToViewport, 0);
     });
 
     // Tabs

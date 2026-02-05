@@ -2042,6 +2042,7 @@
       'stat_orange': `${pop.orange} (${pop.orangeEggs}🥚) [${phaseNames[c0.phase]}]`,
       'stat_cyan': `${pop.cyan} (${pop.cyanEggs}🥚) [${phaseNames[c1.phase]}]`,
       'stat_beetle': pop.beetles,
+      'stat_mealworm': pop.mealworms,
       'stat_worm': pop.worms
     };
     for (let id in lMap) {
@@ -2061,6 +2062,36 @@
     if (diagPredation) diagPredation.textContent = `${(diag.predationRate * 100).toFixed(0)}%`;
     if (diagPathing) diagPathing.textContent = `${(diag.pathingFail * 100).toFixed(0)}% blocked`;
     if (diagVerdict) diagVerdict.textContent = diag.verdict;
+
+    // Stats tab (menu)
+    const ph = currentPhase();
+    const frac = dayFracFromGameSeconds(gameSeconds);
+    const hh = Math.floor((frac * 24 + 24) % 24);
+    const mm = Math.floor((((frac * 24) % 1) * 60 + 60) % 60);
+    const pad2 = (n) => (n < 10 ? '0' + n : '' + n);
+
+    const statPhase = document.getElementById('stat_phase');
+    const statTime = document.getElementById('stat_time');
+    const statDayFrac = document.getElementById('stat_dayfrac');
+    if (statPhase) statPhase.textContent = `${ph.name} (${(ph.light * 100).toFixed(0)}%)`;
+    if (statTime) statTime.textContent = `${pad2(hh)}:${pad2(mm)}`;
+    if (statDayFrac) statDayFrac.textContent = frac.toFixed(3);
+
+    const statCols = document.getElementById('stat_colonies');
+    if (statCols) {
+      const lines = colonies.map((c) => {
+        const popA = ants.filter(a => a.team === c.team && a.caste !== CASTE.EGG).length;
+        const eggsA = ants.filter(a => a.team === c.team && a.caste === CASTE.EGG).length;
+        const males = ants.filter(a => a.team === c.team && a.caste === CASTE.MALE && a.y === SURFACE_WALK_Y);
+        const malesOnTrees = males.filter(m => trees.some(t => t.x === m.x)).length;
+        const ch = (c.thrive?.maleEggChance ?? c.maleEggChance ?? 0).toFixed(2);
+        const tgt = (c.maleTargetOnTrees || 1);
+        const fs = (c.thrive?.qbFailStreak ?? 0);
+        return `team ${c.team}  pop ${popA}/${eggsA}  phase ${phaseNames[c.phase]}`
+          + `\n  malesOnTrees ${malesOnTrees}/${tgt}  maleEggChance ${ch}  qbFailStreak ${fs}`;
+      });
+      statCols.textContent = lines.join('\n\n');
+    }
   }
 
   /* =========================================================
