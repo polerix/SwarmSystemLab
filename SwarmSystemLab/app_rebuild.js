@@ -35,6 +35,10 @@
 
   let gameSeconds = 0; // monotonically increasing
 
+  // Weather events
+  const WEATHER = { CLEAR: 'clear', WINDY: 'windy', RAIN: 'rain', SUNNY: 'sunny' };
+  const weather = { kind: WEATHER.CLEAR, untilGS: 0 };
+
   function getDayPhase(tDayFrac) {
     // tDayFrac in [0,1)
     const a = DAY_PHASE.sunrise;
@@ -62,6 +66,115 @@
 
   function currentPhase() {
     return getDayPhase(dayFracFromGameSeconds(gameSeconds));
+  }
+
+  function isShaded(x, y) {
+    // Shade is provided by dirt/rock/leaf/wood(tree)
+    // Simplified: if there is a solid tile above, or a leaf resource on surface, or a tree at this x.
+    if (y <= 0) return false;
+    const aboveSolid = tileAt(x, y - 1) !== TILE.AIR;
+    if (aboveSolid) return true;
+    if (trees.some(t => t.x === wrapX(x))) return true;
+    if (resources.some(r => !r.dead && !r.carried && r.kind === 'leaf' && r.x === wrapX(x) && r.y === SURFACE_WALK_Y)) return true;
+    return false;
+  }
+
+  function tickWeather(gsdt) {
+    const ph = currentPhase();
+
+    if (!weather.untilGS || gameSeconds >= weather.untilGS) {
+      // Choose next weather event
+      const r = Math.random();
+      let kind = WEATHER.CLEAR;
+      if (r < 0.10) kind = WEATHER.WINDY;
+      else if (r < 0.20) kind = WEATHER.RAIN;
+      else if (r < 0.30 && ph.isDay) kind = WEATHER.SUNNY;
+      else kind = WEATHER.CLEAR;
+
+      const dur = irand(2 * GS_HOUR, 6 * GS_HOUR);
+      weather.kind = kind;
+      weather.untilGS = gameSeconds + dur;
+    }
+
+    // Apply effects
+    if (weather.kind === WEATHER.WINDY) {
+      // Move leaves on the surface
+      for (let n = 0; n < 25; n++) {
+        const r = resources[(Math.random() * resources.length) | 0];
+        if (!r || r.dead || r.carried) continue;
+        if (r.kind !== 'leaf') continue;
+        if (r.y !== SURFACE_WALK_Y) continue;
+        const dir = Math.random() < 0.5 ? -1 : 1;
+        r.x = wrapX(r.x + dir);
+      }
+    }
+
+    if (weather.kind === WEATHER.RAIN) {
+      // Wet up to 3 tiles deep + add water that flows downward
+      for (let n = 0; n < 160; n++) {
+        const x = irand(0, W - 1);
+        // add surface water
+        const si = idx(x, SURFACE_WALK_Y);
+        water[si] = Math.min(5, water[si] + 0.25);
+        // wet 3 deep
+        for (let d = 0; d < 3; d++) {
+          const y = surfaceY + d;
+          const i = idx(x, y);
+          moisture[i] = clamp(moisture[i] + 0.02, 0, 1);
+        }
+      }
+
+      // Water flow: falls down until blocked, then absorbs
+      for (let n = 0; n < 260; n++) {
+        const x = irand(0, W - 1);
+        const y = irand(0, H - 2);
+        const i = idx(x, y);
+        const wv = water[i];
+        if (wv <= 0.001) continue;
+        const bi = idx(x, y + 1);
+        const below = tile[bi];
+        if (below === TILE.AIR || below === TILE.TUNNEL) {
+          const moved = Math.min(wv, 0.5);
+          water[i] -= moved;
+          water[bi] = Math.min(8, water[bi] + moved);
+        } else {
+          // absorb into moisture
+          const take = Math.min(wv, 0.20);
+          water[i] -= take;
+          moisture[i] = clamp(moisture[i] + take * 0.04, 0, 1);
+        }
+      }
+    }
+
+    // Sunshine drying rules (daylight always dries; SUNNY event amplifies)
+    const sunFactor = (ph.isDay ? 1 : 0) * (weather.kind === WEATHER.SUNNY ? 2.2 : 1.0);
+    if (sunFactor > 0) {
+      // Dry surface tiles to 3-tile height (moisture)
+      for (let n = 0; n < 220; n++) {
+        const x = irand(0, W - 1);
+        for (let d = 0; d < 3; d++) {
+          const y = surfaceY + d;
+          const i = idx(x, y);
+          if (isShaded(x, y)) continue;
+          moisture[i] = clamp(moisture[i] - 0.0025 * sunFactor, 0, 1);
+        }
+      }
+
+      // Dry water up to 2 tiles down unless shaded
+      for (let n = 0; n < 220; n++) {
+        const x = irand(0, W - 1);
+        for (let d = 0; d < 2; d++) {
+          const y = surfaceY + d;
+          const i = idx(x, y);
+          if (isShaded(x, y)) continue;
+          const evap = Math.min(water[i], 0.05 * sunFactor);
+          water[i] -= evap;
+        }
+      }
+    }
+
+    // Expose for UI
+    window.SWARM_WEATHER = { kind: weather.kind, untilGS: weather.untilGS };
   }
 
   /* =========================================================
@@ -185,8 +298,12 @@
 
   const tile = new Uint8Array(W * H);
   const moisture = new Float32Array(W * H);
+  // Surface/underground water film (for rain + flow before absorption)
+  const water = new Float32Array(W * H);
   // Root-dirt nutrient mass (poor nutrition, but crucial for trees/soil cycling)
   const rootMass = new Float32Array(W * H);
+  // Fertility (slowly built from decomposed root-dirt)
+  const fertility = new Float32Array(W * H);
 
   const tileAt = (x, y) => tile[idx(wrapX(x), y)];
   const setTile = (x, y, t) => tile[idx(wrapX(x), y)] = t;
@@ -653,8 +770,12 @@
 
   // --- AI LOGIC ---
   // Root-dirt slowly sinks, filling tunnels over geologic time.
+  // Also converts into fertility (very slowly).
   let rootSinkAcc = 0;
   const ROOT_SINK_INTERVAL_GS = 4 * GAME_YEAR_SECONDS;
+
+  // Fertility conversion rate: rootMass -> fertility per in-game second
+  const ROOT_TO_FERT_RATE = 0.000002; // slow on purpose
   function rootDirtSinkStep() {
     // bottom-up so a tile doesn't move twice in one pass
     for (let y = H - 2; y >= 0; y--) {
@@ -680,6 +801,21 @@
   function tickSimulation(dt) {
     // Advance cosmic clock
     gameSeconds += dt * GAME_SECONDS_PER_REAL_SECOND;
+
+    // Expose time for UI (orb position)
+    const ph = currentPhase();
+    const frac = dayFracFromGameSeconds(gameSeconds);
+    window.SWARM_TIME = {
+      isDay: ph.isDay,
+      isNight: ph.isNight,
+      phase: ph.name,
+      light: ph.light,
+      dayPhase: frac,  // 0..1 across day
+      dayT: ph.light   // used for simple vertical bob
+    };
+
+    // Weather
+    tickWeather(dt * GAME_SECONDS_PER_REAL_SECOND);
 
     // Track queen babies per colony (for escort behavior)
     for (const c of colonies) c.queenBabyId = -1;
@@ -727,6 +863,21 @@
     }
 
     pruneRecruit();
+
+    // 0. Root-dirt -> fertility (slow conversion)
+    const gsdt = dt * GAME_SECONDS_PER_REAL_SECOND;
+    // Sample-based update to keep it cheap
+    const samples = 180;
+    for (let s = 0; s < samples; s++) {
+      const x = irand(0, W - 1);
+      const y = irand(surfaceY, H - 1);
+      const i = idx(x, y);
+      const rm = rootMass[i];
+      if (rm <= 0) continue;
+      const take = Math.min(rm, rm * ROOT_TO_FERT_RATE * gsdt * 500); // scale up due to sampling
+      rootMass[i] -= take;
+      fertility[i] = Math.min(1000, fertility[i] + take);
+    }
 
     // 0. Corpse timeout (1h in-game)
     for (let i = resources.length - 1; i >= 0; i--) {
@@ -1800,7 +1951,9 @@
         let i = idx(x, y);
         tile[i] = (y < surfaceY) ? TILE.AIR : TILE.SOIL;
         moisture[i] = (y < surfaceY) ? 0 : 0.5;
+        water[i] = 0;
         rootMass[i] = 0;
+        fertility[i] = 0;
         if (y > surfaceY + 10 && Math.random() < 0.05) tile[i] = TILE.ROCKS;
       }
     }
@@ -1819,9 +1972,11 @@
      5) Rendering with Emojis
   ========================================================= */
   function draw() {
-    // Clear screen
-    ctx.fillStyle = "#05060a";
-    ctx.fillRect(0, 0, innerWidth, innerHeight); // This assumes identity transform or consistent?
+    // Clear screen (sky)
+    const ph = currentPhase();
+    const sky = ph.isNight ? "#050814" : "#5db7ff"; // navy blue-black at night, blue sky at day
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, innerWidth, innerHeight);
     // Wait! ctx.fillRect uses context logical units. 
     // With setTransform in resize, 1 unit = 1 logical pixel.
     // But innerWidth is logical pixels. So if DPR=2, rect is correct logical size.
@@ -1989,9 +2144,8 @@
       }
     });
 
-    // === Lighting: Menu orb is the light source ===
-    // Day: yellow orb with white shine @ 100% light
-    // Night: grey orb @ 30% max light
+    // === Lighting (UI-only): menu orb is the indicator, but no radial blend on the world ===
+    // Flat yellow for sunlight, flat 20% grey for moonlight.
     try {
       const phase = currentPhase();
       const wrapperEl = document.getElementById('sphereWrapper');
@@ -1999,32 +2153,7 @@
         wrapperEl.dataset.phase = phase.name;
         wrapperEl.dataset.isNight = phase.isNight ? '1' : '0';
       }
-
-      const orbRect = (document.getElementById('menuSphere') || wrapperEl)?.getBoundingClientRect?.();
-      const cx = orbRect ? (orbRect.left + orbRect.width * 0.5) : (innerWidth - 50);
-      const cy = orbRect ? (orbRect.top + orbRect.height * 0.5) : 50;
-
-      // Darkness overlay strength scales opposite of light
-      const darkness = clamp(0.75 - 0.65 * phase.light, 0.05, 0.75);
-      ctx.save();
-      ctx.globalCompositeOperation = 'source-over';
-      ctx.fillStyle = `rgba(0,0,0,${darkness.toFixed(3)})`;
-      ctx.fillRect(0, 0, innerWidth, innerHeight);
-
-      // Cut out a radial light cone centered on the orb
-      ctx.globalCompositeOperation = 'destination-out';
-      const r0 = 20;
-      const r1 = Math.min(innerWidth, innerHeight) * (0.35 + 0.35 * phase.light);
-      const g = ctx.createRadialGradient(cx, cy, r0, cx, cy, r1);
-      g.addColorStop(0.0, `rgba(0,0,0,${(0.95 * phase.light).toFixed(3)})`);
-      g.addColorStop(0.6, `rgba(0,0,0,${(0.45 * phase.light).toFixed(3)})`);
-      g.addColorStop(1.0, 'rgba(0,0,0,0)');
-      ctx.fillStyle = g;
-      ctx.beginPath();
-      ctx.arc(cx, cy, r1, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-    } catch (e) { /* ignore lighting errors */ }
+    } catch (e) { }
 
     // DEBUG OVERLAY
     if (true) {
