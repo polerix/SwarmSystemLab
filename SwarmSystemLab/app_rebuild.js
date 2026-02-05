@@ -1,7 +1,6 @@
 /*
   app_rebuild.js
   Rebuilt Swarm System Lab with Emoji assets, Liquid Glass UI support, and Self-Balancing logic.
-  Now with Sky/Sun/Clouds and Tree system (leaves + apples that drop).
 */
 
 (() => {
@@ -13,12 +12,57 @@
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const irand = (a, b) => a + ((Math.random() * (b - a + 1)) | 0);
   const choice = (arr) => arr[(Math.random() * arr.length) | 0];
-  const lerp = (a, b, t) => a + (b - a) * t;
 
-  // Time scale: 1 in-game day = 30 minutes real-time
-  const DAY_SEC = 30 * 60;
-  const WEEK_SEC = 7 * DAY_SEC;
-  const MONTH_SEC = 30 * DAY_SEC;
+  /* =========================================================
+     0b) Game Time (Cosmic Clockwork)
+     - 1 in-game day = 20 minutes real time
+     - => 72 game seconds per real second
+     - Day phases per real-time budget:
+         sunrise 1.5m, day 10m, sunset 1.5m, night 7m
+  ========================================================= */
+  const GAME_SECONDS_PER_REAL_SECOND = 72;
+  const GAME_DAY_SECONDS = 24 * 60 * 60;
+  const GAME_YEAR_DAYS = 365;
+  const GAME_YEAR_SECONDS = GAME_YEAR_DAYS * GAME_DAY_SECONDS;
+
+  // Phase fractions (must sum to 1)
+  const DAY_PHASE = {
+    sunrise: 0.075,
+    day: 0.50,
+    sunset: 0.075,
+    night: 0.35
+  };
+
+  let gameSeconds = 0; // monotonically increasing
+
+  function getDayPhase(tDayFrac) {
+    // tDayFrac in [0,1)
+    const a = DAY_PHASE.sunrise;
+    const b = a + DAY_PHASE.day;
+    const c = b + DAY_PHASE.sunset;
+
+    if (tDayFrac < a) {
+      const k = tDayFrac / a; // 0..1
+      return { name: 'sunrise', isDay: true, isNight: false, light: 0.30 + 0.70 * k };
+    }
+    if (tDayFrac < b) {
+      return { name: 'day', isDay: true, isNight: false, light: 1.0 };
+    }
+    if (tDayFrac < c) {
+      const k = (tDayFrac - b) / DAY_PHASE.sunset;
+      return { name: 'sunset', isDay: true, isNight: false, light: 1.0 - 0.70 * k };
+    }
+    return { name: 'night', isDay: false, isNight: true, light: 0.30 };
+  }
+
+  function dayFracFromGameSeconds(gs) {
+    const d = ((gs % GAME_DAY_SECONDS) + GAME_DAY_SECONDS) % GAME_DAY_SECONDS;
+    return d / GAME_DAY_SECONDS;
+  }
+
+  function currentPhase() {
+    return getDayPhase(dayFracFromGameSeconds(gameSeconds));
+  }
 
   /* =========================================================
      1) Configuration & Toggles
@@ -35,8 +79,7 @@
     protein: true,
     spore: true,
     sound_on: false,
-    volume: 0.35,
-    tree: true  // New toggle for trees
+    volume: 0.35
   };
 
   // Expose toggles
@@ -138,14 +181,26 @@
   /* =========================================================
      3) Simulation World
   ========================================================= */
-  const TILE = { AIR: 0, SOIL: 1, TUNNEL: 2, ROCKS: 3, ROCKM: 4, ROCKL: 5 };
+  const TILE = { AIR: 0, SOIL: 1, TUNNEL: 2, ROCKS: 3, ROCKM: 4, ROCKL: 5, ROOT_DIRT: 6 };
 
   const tile = new Uint8Array(W * H);
   const moisture = new Float32Array(W * H);
+  // Root-dirt nutrient mass (poor nutrition, but crucial for trees/soil cycling)
+  const rootMass = new Float32Array(W * H);
 
   const tileAt = (x, y) => tile[idx(wrapX(x), y)];
   const setTile = (x, y, t) => tile[idx(wrapX(x), y)] = t;
   const isSoil = (x, y) => inb(x, y) && tileAt(x, y) === TILE.SOIL;
+
+  function depositRootDirt(x, y, mass) {
+    if (!inb(x, y)) return;
+    const wx = wrapX(x);
+    const i = idx(wx, y);
+    rootMass[i] += mass;
+    // Deposit into soil/tunnel as a root-dirt tile marker (poor nutrition)
+    const t = tile[i];
+    if (t === TILE.SOIL || t === TILE.TUNNEL) tile[i] = TILE.ROOT_DIRT;
+  }
 
   const EMOJI = {
     ANT: '🐜',
@@ -153,8 +208,6 @@
     WORM: '🪱',
     SPIDER: '🕷️',
     LEAF: '🍃',
-    APPLE: '🍎',
-    TREE: '🌳',
     MUSHROOM: '🍄',
     PROTEIN: '🍖',
     SPORE: '🦠'
@@ -165,19 +218,22 @@
   ========================================================= */
   const CASTE = {
     QUEEN: 0,
-    EGG: 1,        // dormant, hatches after time
-    NANITIC: 2,    // first-gen workers, small, forage-focused
-    WORKER: 3,     // standard workers: dig, haul, feed queen
-    SOLDIER: 4     // defenders (future)
+    EGG: 1,          // dormant, hatches after time (willBe determines outcome)
+    NANITIC: 2,      // first-gen workers ("ninantic"), small, forage-focused
+    WORKER: 3,       // standard workers: dig, haul, feed queen
+    EXPLORER: 4,     // scouts: range further + lay food pheromones
+    WARRIOR: 5,      // defenders: fight worms/beetles/enemy ants; retrieve foreign corpses
+    MALE: 6          // escorted out (despawn on surface)
   };
 
   const ROLE = {
     IDLE: 0,
-    FORAGE: 1,     // go to surface, find food, return
-    DIG: 2,        // expand tunnels
-    HAUL_DIRT: 3,  // carry dirt to surface mound
-    FEED_QUEEN: 4, // bring food to queen
-    DEFEND: 5      // attack threats
+    FORAGE: 1,      // go to surface, find food, return
+    DIG: 2,         // expand tunnels
+    HAUL_DIRT: 3,   // carry dirt to surface mound
+    FEED_QUEEN: 4,  // bring food to queen
+    DEFEND: 5,      // attack threats
+    SCOUT: 6        // long-range exploration + pheromone trails
   };
 
   // Colony lifecycle phases
@@ -193,6 +249,106 @@
   const mobs = [];
   const resources = [];
   const plants = [];
+  const trees = [];
+
+  // Surface pheromone field (food trails) - explorers lay it, workers follow it
+  const pherFood = new Float32Array(W * H);
+  function addPherFood(x, y, v) {
+    if (!inb(x, y)) return;
+    pherFood[idx(wrapX(x), y)] = clamp(pherFood[idx(wrapX(x), y)] + v, 0, 1000);
+  }
+  function pherAt(x, y) {
+    if (!inb(x, y)) return 0;
+    return pherFood[idx(wrapX(x), y)];
+  }
+
+  // Explorer recruitment pings: workers can latch onto a target and run a dedicated haul.
+  const recruitSignals = []; // {team,x,y,kind,score,untilGS}
+  function addRecruit(team, x, y, kind, score = 10, ttlGS = 2 * GS_HOUR) {
+    recruitSignals.push({ team, x: wrapX(x), y, kind, score, untilGS: gameSeconds + ttlGS });
+  }
+  function pruneRecruit() {
+    for (let i = recruitSignals.length - 1; i >= 0; i--) {
+      if (gameSeconds >= recruitSignals[i].untilGS) recruitSignals.splice(i, 1);
+    }
+  }
+  function bestRecruitFor(team, ax, ay) {
+    let best = null;
+    let bestScore = -1;
+    for (const s of recruitSignals) {
+      if (s.team !== team) continue;
+      const d = wrappedDist(ax, ay, s.x, s.y);
+      const sc = s.score - d * 0.15;
+      if (sc > bestScore) { bestScore = sc; best = s; }
+    }
+    return bestScore > 0 ? best : null;
+  }
+
+  // Helper: game-time durations
+  const GS_HOUR = 60 * 60;
+  const GS_DAY = GAME_DAY_SECONDS;
+  const GS_WEEK = 7 * GS_DAY;
+  const GS_MONTH = 30 * GS_DAY;
+  const GS_YEAR = GAME_YEAR_SECONDS;
+
+  // Lifecycle stats (global ordering constraints)
+  // Attack: Egg < Adult < Juvenile
+  // Defense: Egg < Adult < Juvenile
+  // Food: Egg < Juvenile < Adult
+  const STAGE = { EGG: 'egg', JUV: 'juvenile', ADULT: 'adult' };
+  const STAGE_MUL = {
+    egg: { atk: 0.5, def: 0.5, food: 0.35 },
+    juvenile: { atk: 1.25, def: 1.25, food: 0.70 },
+    adult: { atk: 0.85, def: 0.85, food: 1.00 }
+  };
+  function applyStageStats(ent, base) {
+    const m = STAGE_MUL[ent.stage] || STAGE_MUL.adult;
+    ent.atk = base.atk * m.atk;
+    ent.def = base.def * m.def;
+    ent.foodValue = base.food * m.food;
+    // corpse bonus: additional edible value; keep it near base food
+    ent.corpseBonus = base.food;
+  }
+
+  // Team color palette (team id -> CSS color)
+  const TEAM_COLORS = ["orange", "cyan", "#a3ff5f", "#ff5fe1", "#ffd25f", "#5fb4ff", "#c75fff"];
+  function teamColor(team) {
+    if (TEAM_COLORS[team]) return TEAM_COLORS[team];
+    // deterministic-ish fallback
+    const hue = (team * 137.5) % 360;
+    return `hsl(${hue} 90% 60%)`;
+  }
+
+  function newColony(team, homeX, homeY) {
+    const c = {
+      team,
+      homeX: wrapX(homeX),
+      homeY: clamp(homeY, surfaceY + 5, H - 5),
+      queenId: -1,
+      phase: PHASE.FOUNDING,
+      foodStore: 10,
+      eggTimer: 0,
+      naniticCount: 0,
+      workerCount: 0,
+      respawnAtGS: 0,
+      founding: { entranceX: wrapX(homeX), entranceY: SURFACE_WALK_Y, sealed: false, dugToY: SURFACE_WALK_Y },
+      foreignFed: 0,
+      queenBabyId: -1,
+      maleEggChance: 0.08,
+      maleTargetOnTrees: 1,
+      thrive: { qbSpawnedAtGS: 0, qbFailStreak: 0, qbLastMateAtGS: 0 }
+    };
+    colonies.push(c);
+    return c;
+  }
+
+  function allocTeam() {
+    // allocate next unused integer id
+    let t = 0;
+    while (colonies.some(c => c.team === t)) t++;
+    return t;
+  }
+
   const colonies = [
     { 
       team: 0, homeX: 0, homeY: 0, queenId: -1,
@@ -200,7 +356,14 @@
       foodStore: 10,      // food available to queen
       eggTimer: 0,
       naniticCount: 0,
-      workerCount: 0
+      workerCount: 0,
+      respawnAtGS: 0,
+      founding: { entranceX: 0, entranceY: SURFACE_WALK_Y, sealed: false, dugToY: 0 },
+      foreignFed: 0,
+      queenBabyId: -1,
+      maleEggChance: 0.08,
+      maleTargetOnTrees: 1,
+      thrive: { qbSpawnedAtGS: 0, qbFailStreak: 0, qbLastMateAtGS: 0 }
     },
     { 
       team: 1, homeX: 0, homeY: 0, queenId: -1,
@@ -208,18 +371,16 @@
       foodStore: 10,
       eggTimer: 0,
       naniticCount: 0,
-      workerCount: 0
+      respawnAtGS: 0,
+      workerCount: 0,
+      founding: { entranceX: 0, entranceY: SURFACE_WALK_Y, sealed: false, dugToY: 0 },
+      foreignFed: 0,
+      queenBabyId: -1,
+      maleEggChance: 0.08,
+      maleTargetOnTrees: 1,
+      thrive: { qbSpawnedAtGS: 0, qbFailStreak: 0, qbLastMateAtGS: 0 }
     }
   ];
-
-  // Trees live on the surface and drop leaves + apples.
-  const trees = [];
-
-  // Sky elements
-  const sky = {
-    t: 0,
-    clouds: []
-  };
 
   /* =========================================================
      Diagnostic Tracking
@@ -293,9 +454,6 @@
   /* =========================================================
      4) Simulation Logic
   ========================================================= */
-  // Ninantic-ish worker lifecycle states
-  const ANT_STATE = { DIG: 0, FORAGE: 1, CARRY: 2, FEED: 3 };
-
   function wrappedDist(x1, y1, x2, y2) {
     let dx = Math.abs(wrapX(x1) - wrapX(x2));
     dx = Math.min(dx, W - dx);
@@ -312,64 +470,109 @@
     const a = {
       id: nextId++, team, caste, x, y,
       hp: 100, hpMax: 100, e: 100, eMax: 100,
+      atk: 6, def: 6,
       role: ROLE.IDLE, carried: null, carriedKind: null,
       moveT: 0, age: 0, hatchTime: 0,
       life: 2000 + Math.random() * 500,
-      target: null  // {x, y} for pathfinding goals
+      bornAtGS: gameSeconds,
+      dieAtGS: gameSeconds + (40 * GS_DAY),
+      target: null,  // {x, y} for pathfinding goals
+      mem: {}
     };
-
-    if (caste === CASTE.QUEEN) {
+    
+    if (caste === CASTE.QUEEN) { 
       a.hpMax = 5000; a.hp = 5000; a.life = 999999;
+      a.atk = 4; a.def = 18;
+      a.dieAtGS = gameSeconds + (9999 * GS_YEAR);
     } else if (caste === CASTE.EGG) {
-      a.hp = 50; a.hpMax = 50;
+      a.hp = 20; a.hpMax = 20;
+      a.atk = 1; a.def = 1;
       a.hatchTime = 8 + Math.random() * 4; // seconds to hatch
       a.willBe = CASTE.NANITIC; // what it hatches into
+      a.dieAtGS = gameSeconds + (5 * GS_DAY);
     } else if (caste === CASTE.NANITIC) {
-      a.hp = 60; a.hpMax = 60; a.life = 800 + Math.random() * 200;
+      a.hp = 55; a.hpMax = 55; a.life = 800 + Math.random() * 200;
+      a.atk = 7; a.def = 7;
       a.role = ROLE.FORAGE;
+      a.dieAtGS = gameSeconds + (18 * GS_DAY);
     } else if (caste === CASTE.WORKER) {
-      a.hp = 100; a.hpMax = 100; a.life = 1500 + Math.random() * 500;
+      a.hp = 95; a.hpMax = 95; a.life = 1500 + Math.random() * 500;
+      a.atk = 8; a.def = 8;
       a.role = ROLE.IDLE;
+      a.dieAtGS = gameSeconds + (30 * GS_DAY);
+    } else if (caste === CASTE.EXPLORER) {
+      a.hp = 80; a.hpMax = 80;
+      a.atk = 9; a.def = 9;
+      a.role = ROLE.SCOUT;
+      a.dieAtGS = gameSeconds + (25 * GS_DAY);
+    } else if (caste === CASTE.WARRIOR) {
+      a.hp = 150; a.hpMax = 150;
+      a.atk = 16; a.def = 16;
+      a.role = ROLE.DEFEND;
+      a.dieAtGS = gameSeconds + (22 * GS_DAY);
+    } else if (caste === CASTE.MALE) {
+      a.hp = 35; a.hpMax = 35;
+      a.atk = 2; a.def = 2;
+      a.role = ROLE.IDLE;
+      // Long enough to be found; will also die after mating.
+      a.dieAtGS = gameSeconds + (10 * GS_DAY);
     }
-
+    
     ants.push(a);
     return a;
   }
 
-  function spawnMob(type, x, y) {
-    const m = { type, x: wrapX(x), y, hp: 50, hpMax: 50, moveT: 0, dead: false };
-    if (type === 'worm') { m.hp = 150; m.hpMax = 150; }
-    if (type === 'spider') { m.hp = 80; m.hpMax = 80; }
-    mobs.push(m);
-  }
+  function spawnMob(type, x, y, opts = {}) {
+    // All lifeforms participate in Egg -> Juvenile -> Adult, then Root-dirt on death.
+    const base = (
+      type === 'worm' ? { hp: 120, atk: 6, def: 10, food: 12, life: 40 * GS_DAY } :
+      type === 'mealworm' ? { hp: 55, atk: 5, def: 9, food: 10, life: 25 * GS_DAY } :
+      type === 'beetle' ? { hp: 75, atk: 10, def: 10, food: 16, life: 18 * GS_DAY } :
+      type === 'spider' ? { hp: 90, atk: 16, def: 8, food: 14, life: 22 * GS_DAY } :
+      { hp: 50, atk: 10, def: 10, food: 10, life: 20 * GS_DAY }
+    );
 
-  function baseFoodFor(kind) {
-    if (kind === 'apple') return 10;
-    if (kind === 'leaf') return 6;
-    if (kind === 'protein') return 12;
-    if (kind === 'mushroom') return 4;
-    if (kind === 'spore') return 1;
-    return 0;
-  }
-
-  function addRes(kind, x, y, opts = null) {
-    const r = {
+    const m = {
       id: nextId++,
-      kind,
+      type,
       x: wrapX(x),
       y,
-      amt: 10,
+      stage: opts.stage || STAGE.ADULT,
+      hp: base.hp,
+      hpMax: base.hp,
+      atk: base.atk,
+      def: base.def,
+      foodValue: base.food,
+      corpseBonus: base.food,
+      moveT: 0,
       dead: false,
-      carried: false,
-      vy: 0,
-      falling: false,
-      bornT: sky.t || 0,
-      baseFood: baseFoodFor(kind),
-      food: baseFoodFor(kind)
+      e: opts.e ?? 100,
+      eMax: opts.eMax ?? 100,
+      bornAtGS: gameSeconds,
+      dieAtGS: gameSeconds + (opts.lifespanGS ?? base.life),
+      // lifecycle timers
+      hatchAtGS: opts.hatchAtGS || 0,
+      adultAtGS: opts.adultAtGS || 0,
+      // behavior state
+      state: opts.state || 'wander',
+      foodCap: opts.foodCap || 40,
+      foodHeld: opts.foodHeld || 0,
+      mateCooldownAtGS: 0
     };
-    if (opts) Object.assign(r, opts);
-    resources.push(r);
-    return r;
+
+    // Apply global stage-based stat curve
+    applyStageStats(m, base);
+
+    // Stage-specific HP scaling (keeps ordering readable)
+    if (m.stage === STAGE.EGG) { m.hpMax = Math.max(5, base.hp * 0.25); m.hp = m.hpMax; }
+    if (m.stage === STAGE.JUV) { m.hpMax = base.hp * 0.80; m.hp = m.hpMax; }
+
+    mobs.push(m);
+    return m;
+  }
+
+  function addRes(kind, x, y, extra = {}) {
+    resources.push({ id: nextId++, kind, x: wrapX(x), y, amt: 10, dead: false, ...extra });
   }
 
   // --- SPAWNERS & TOGGLES ---
@@ -383,7 +586,6 @@
     if (!PLAY_FLAGS.ant_cyan) killColony(1);
 
     if (!PLAY_FLAGS.leaf) removeRes('leaf');
-    if (!PLAY_FLAGS.tree) { removeRes('apple'); /* leaves may still spawn via background if leaf on */ }
   }
 
   function removeMobs(pred) {
@@ -405,60 +607,130 @@
     colonies[team].foodStore = 10;
     colonies[team].naniticCount = 0;
     colonies[team].workerCount = 0;
+    // If ant colony dies off, wait a day and respawn a new queen.
+    colonies[team].respawnAtGS = gameSeconds + GAME_DAY_SECONDS;
   }
   function respawnColony(team) {
     if (colonies[team].queenId !== -1) return;
     const c = colonies[team];
-    setTile(c.homeX, c.homeY, TILE.TUNNEL);
-    // Dig initial chamber
-    for (let dy = -1; dy <= 1; dy++) {
-      for (let dx = -1; dx <= 1; dx++) {
-        if (inb(c.homeX + dx, c.homeY + dy)) {
-          setTile(c.homeX + dx, c.homeY + dy, TILE.TUNNEL);
-        }
-      }
-    }
-    const q = spawnAnt(team, CASTE.QUEEN, c.homeX, c.homeY);
+    if (gameSeconds < (c.respawnAtGS || 0)) return;
+
+    // Queen starts on the surface, chews off wings (instant), then digs a founding chamber.
+    c.founding.entranceX = c.homeX;
+    c.founding.entranceY = SURFACE_WALK_Y;
+    c.founding.sealed = false;
+    c.founding.dugToY = SURFACE_WALK_Y;
+
+    const q = spawnAnt(team, CASTE.QUEEN, c.homeX, SURFACE_WALK_Y);
+    q.mem.wingsChewed = true;
+    q.mem.founding = true;
+
+    // Set homeY target depth (deep enough)
+    c.homeY = surfaceY + 15;
+
     c.queenId = q.id;
     c.phase = PHASE.FOUNDING;
     c.foodStore = 10;
     c.eggTimer = 0;
     c.naniticCount = 0;
     c.workerCount = 0;
+    c.foreignFed = 0;
+    c.respawnAtGS = 0;
   }
 
   // --- AI LOGIC ---
-  // Ninantic-ish workers:
-  //  (1) dig to explore, (2) bring back food, (3) feed queen until they die of old age.
-  function tickSimulation(dt) {
-    // 0) Sky time + clouds
-    sky.t += dt;
-    tickClouds(dt);
+  // Root-dirt slowly sinks, filling tunnels over geologic time.
+  let rootSinkAcc = 0;
+  const ROOT_SINK_INTERVAL_GS = 4 * GAME_YEAR_SECONDS;
+  function rootDirtSinkStep() {
+    // bottom-up so a tile doesn't move twice in one pass
+    for (let y = H - 2; y >= 0; y--) {
+      for (let x = 0; x < W; x++) {
+        const i = idx(x, y);
+        if (tile[i] !== TILE.ROOT_DIRT) continue;
+        const by = y + 1;
+        if (!inb(x, by)) continue;
+        const bi = idx(x, by);
+        const below = tile[bi];
+        // Root-dirt stops going down until free/consumed.
+        // Treat AIR and TUNNEL as "free" (tunnels get filled in).
+        if (below === TILE.AIR || below === TILE.TUNNEL) {
+          tile[bi] = TILE.ROOT_DIRT;
+          rootMass[bi] += rootMass[i];
+          rootMass[i] = 0;
+          tile[i] = TILE.SOIL;
+        }
+      }
+    }
+  }
 
-    // 0b) Queen hunger/food store
-    for (const col of colonies) {
-      // Queens consume colony food; if it hits 0, queen starts losing hp.
-      col.foodStore = Math.max(0, col.foodStore - dt * 0.9);
-      const q = ants.find(a => a.id === col.queenId);
-      if (q) {
-        if (col.foodStore <= 0.01) q.hp -= dt * 6;
-        else q.hp = Math.min(q.hpMax, q.hp + dt * 1.5);
+  function tickSimulation(dt) {
+    // Advance cosmic clock
+    gameSeconds += dt * GAME_SECONDS_PER_REAL_SECOND;
+
+    // Track queen babies per colony (for escort behavior)
+    for (const c of colonies) c.queenBabyId = -1;
+    for (const a of ants) {
+      if (a.caste === CASTE.QUEEN && a.mem.queenBaby && a.mem.originTeam !== undefined) {
+        const c = colonies.find(cc => cc.team === a.mem.originTeam);
+        if (c) c.queenBabyId = a.id;
       }
     }
 
-    // 0c) Trees grow & drop
-    if (PLAY_FLAGS.tree) tickTrees(dt);
+    // Thrive controller (KPI #1): Queen baby should mate within 1 in-game day of spawning.
+    for (const c of colonies) {
+      if (!c.thrive) c.thrive = { qbSpawnedAtGS: 0, qbFailStreak: 0, qbLastMateAtGS: 0 };
 
-    // 0d) Food decay / rot / drying
-    decayFood(dt);
+      if (c.thrive.qbSpawnedAtGS && (gameSeconds - c.thrive.qbSpawnedAtGS) > GS_DAY) {
+        // Failure: queen baby didn't mate in time. Escalate male availability.
+        c.thrive.qbFailStreak = (c.thrive.qbFailStreak || 0) + 1;
+        c.thrive.qbSpawnedAtGS = gameSeconds; // start another window
 
-    // 1) Ants
+        // escalate target males on trees temporarily (cap at 3)
+        c.maleTargetOnTrees = clamp(1 + c.thrive.qbFailStreak, 1, 3);
+      }
+
+      // Adaptive male production: aim for maleTargetOnTrees males on trees per colony.
+      const males = ants.filter(a => a.team === c.team && a.caste === CASTE.MALE && a.y === SURFACE_WALK_Y);
+      const malesOnTrees = males.filter(m => trees.some(t => t.x === m.x)).length;
+      const need = (c.maleTargetOnTrees || 1);
+
+      // If we are below need, boost chance; otherwise decay toward baseline.
+      const boost = 0.35 + 0.10 * Math.min(3, (c.thrive.qbFailStreak || 0));
+      const targetChance = (malesOnTrees < need) ? boost : 0.06;
+      c.maleEggChance = c.maleEggChance ?? 0.08;
+      c.maleEggChance += (targetChance - c.maleEggChance) * 0.04; // slow nudges
+      c.maleEggChance = clamp(c.maleEggChance, 0.01, 0.75);
+    }
+
+    // Pheromone evaporation (surface only)
+    const evap = dt * 2.5;
+    for (let x = 0; x < W; x++) {
+      const i = idx(x, SURFACE_WALK_Y);
+      pherFood[i] = Math.max(0, pherFood[i] - evap);
+    }
+
+    pruneRecruit();
+
+    // 0. Corpse timeout (1h in-game)
+    for (let i = resources.length - 1; i >= 0; i--) {
+      const r = resources[i];
+      if (r.kind === 'corpse' && r.expireAtGS && gameSeconds >= r.expireAtGS && !r.carried) {
+        resources.splice(i, 1);
+      }
+    }
+
+    // 0b. Root-dirt sinking
+    rootSinkAcc += dt * GAME_SECONDS_PER_REAL_SECOND;
+    if (rootSinkAcc >= ROOT_SINK_INTERVAL_GS) {
+      rootSinkAcc = 0;
+      rootDirtSinkStep();
+    }
+
+    // 1. Ants
     for (const a of ants) {
       if (a.hp <= 0) continue;
-
-      // Aging
-      a.age += dt;
-      if (a.age > a.life) { a.dead = true; continue; }
+      if (a.dieAtGS && gameSeconds >= a.dieAtGS) { a.dead = true; continue; }
 
       a.moveT += dt;
       if (a.moveT > 0.15) {
@@ -475,14 +747,29 @@
     }
     for (let i = ants.length - 1; i >= 0; i--) {
       if (ants[i].dead) {
+        const aDead = ants[i];
         diag.antDeaths++;
-        if (ants[i]._killedByMob) diag.antDeathsByPredator++;
-        addRes('protein', ants[i].x, ants[i].y);
+        if (aDead._killedByMob) diag.antDeathsByPredator++;
+
+        // Universal death/decay: deposit root-dirt into soil (poor nutrition)
+        // Root-dirt amount is based on stage food value.
+        const stageFood = (aDead.caste === CASTE.EGG) ? 3 : 10;
+        depositRootDirt(aDead.x, aDead.y, stageFood);
+
+        // Fresh kill: corpse provides additional food value if consumed within 1h game time.
+        addRes('corpse', aDead.x, aDead.y, {
+          food: stageFood,
+          bonusFood: stageFood, // "additional" portion
+          expireAtGS: gameSeconds + 60 * 60,
+          team: aDead.team,
+          from: 'ant'
+        });
+
         ants.splice(i, 1);
       }
     }
 
-    // 2) Mobs
+    // 2. Mobs
     for (const m of mobs) {
       if (m.hp <= 0) continue;
       m.moveT += dt;
@@ -494,23 +781,85 @@
     }
     for (let i = mobs.length - 1; i >= 0; i--) {
       if (mobs[i].dead) {
-        addRes('protein', mobs[i].x, mobs[i].y);
+        const md = mobs[i];
+        // Universal death/decay: deposit root-dirt into soil based on stage food value
+        depositRootDirt(md.x, md.y, md.foodValue || 10);
+
+        // Fresh kill bonus: edible corpse window (1h in-game)
+        addRes('corpse', md.x, md.y, {
+          food: md.foodValue || 10,
+          bonusFood: md.corpseBonus || (md.foodValue || 10),
+          expireAtGS: gameSeconds + 60 * 60
+        });
+
         mobs.splice(i, 1);
       }
     }
 
-    // 3) Background spawners (kept light; trees handle most leaf/apple drops)
-    if (Math.random() < 0.035) {
-      if (PLAY_FLAGS.leaf && !PLAY_FLAGS.tree && Math.random() < 0.5) {
+    // 2b. Trees + apples (new system)
+    for (let i = trees.length - 1; i >= 0; i--) {
+      const t = trees[i];
+      const age = gameSeconds - t.bornAtGS;
+
+      // Growth
+      const matureAt = t.matureAtGS;
+      const k = clamp((gameSeconds - t.bornAtGS) / (matureAt - t.bornAtGS), 0, 1);
+      t.scale = 1 + 3 * k; // up to 400%
+      t.tiles = Math.max(1, Math.round(t.scale));
+
+      // Apple production (once mature)
+      if (gameSeconds >= matureAt && gameSeconds >= (t.nextAppleAtGS || 0)) {
+        // Drop an apple near the tree
+        addRes('apple', t.x, SURFACE_WALK_Y, {
+          rotAtGS: gameSeconds + 2 * GS_DAY,
+          bornAtGS: gameSeconds
+        });
+        t.nextAppleAtGS = gameSeconds + irand(1 * GS_DAY, 3 * GS_DAY);
+      }
+
+      // Death -> root-dirt column (amount equals tiles occupied at death)
+      if (gameSeconds >= t.dieAtGS) {
+        for (let j = 0; j < t.tiles; j++) {
+          depositRootDirt(t.x, SURFACE_WALK_Y + j, 1);
+        }
+        trees.splice(i, 1);
+      }
+    }
+
+    // Resource aging: apple -> rotten_apple, and rotten_apple can seed trees
+    for (const r of resources) {
+      if (r.kind === 'apple' && r.rotAtGS && gameSeconds >= r.rotAtGS) {
+        r.kind = 'rotten_apple';
+        r.rottedAtGS = gameSeconds;
+        // 2% chance: rotten apple grows a tree
+        if (Math.random() < 0.02) {
+          // Avoid stacking too many trees on same x
+          const hasTree = trees.some(t => t.x === r.x);
+          if (!hasTree) {
+            trees.push({
+              x: r.x,
+              bornAtGS: gameSeconds,
+              matureAtGS: gameSeconds + 2 * GS_MONTH,
+              dieAtGS: gameSeconds + 4 * GS_YEAR,
+              scale: 1,
+              tiles: 1,
+              nextAppleAtGS: gameSeconds + 2 * GS_DAY
+            });
+          }
+        }
+      }
+    }
+
+    // 3. Spawners
+    if (Math.random() < 0.05) {
+      if (PLAY_FLAGS.leaf && Math.random() < 0.4) {
         addRes('leaf', irand(0, W), SURFACE_WALK_Y);
       }
       if (PLAY_FLAGS.beetle && Math.random() < 0.03) spawnMob('beetle', irand(0, W), SURFACE_WALK_Y);
+      if (PLAY_FLAGS.mealworm && Math.random() < 0.02) spawnMob('mealworm', irand(0, W), SURFACE_WALK_Y);
       if (PLAY_FLAGS.spider && Math.random() < 0.015) spawnMob('spider', irand(0, W), SURFACE_WALK_Y);
       if (PLAY_FLAGS.worm && Math.random() < 0.01) spawnMob('worm', irand(0, W), irand(surfaceY + 10, H - 10));
     }
-
-    // 4) Simple physics for falling resources
-    tickFallingResources(dt);
   }
 
   function stepAnt(a) {
@@ -523,53 +872,219 @@
         // Hatch!
         a.caste = a.willBe || CASTE.NANITIC;
         a.age = 0;
+
         if (a.caste === CASTE.NANITIC) {
-          a.hp = 60; a.hpMax = 60;
+          a.hp = 55; a.hpMax = 55;
+          a.atk = 7; a.def = 7;
           a.role = ROLE.FORAGE;
           c.naniticCount++;
         } else if (a.caste === CASTE.WORKER) {
-          a.hp = 100; a.hpMax = 100;
+          // 1/100 worker ant hatch as a queen baby
+          if (Math.random() < 0.01) {
+            a.caste = CASTE.QUEEN;
+            a.mem.queenBaby = true;
+            a.mem.originTeam = a.team;
+            a.mem.newTeam = allocTeam();
+            a.mem.waitingMate = true;
+            // record spawn for thrive controller
+            const oc = colonies.find(cc => cc.team === a.mem.originTeam);
+            if (oc) oc.thrive.qbSpawnedAtGS = gameSeconds;
+            // queen baby is overfed (boost)
+            a.hpMax = 220; a.hp = 220;
+            a.atk = 6; a.def = 14;
+            a.role = ROLE.IDLE;
+          } else {
+            a.hp = 95; a.hpMax = 95;
+            a.atk = 8; a.def = 8;
+            a.role = ROLE.IDLE;
+            c.workerCount++;
+          }
+        } else if (a.caste === CASTE.EXPLORER) {
+          a.hp = 80; a.hpMax = 80;
+          a.atk = 9; a.def = 9;
+          a.role = ROLE.SCOUT;
+        } else if (a.caste === CASTE.WARRIOR) {
+          a.hp = 150; a.hpMax = 150;
+          a.atk = 16; a.def = 16;
+          a.role = ROLE.DEFEND;
+        } else if (a.caste === CASTE.MALE) {
+          a.hp = 35; a.hpMax = 35;
+          a.atk = 2; a.def = 2;
           a.role = ROLE.IDLE;
-          c.workerCount++;
         }
       }
       return;
     }
     
-    // === QUEEN: lay eggs based on colony phase ===
+    // === QUEEN: founding behavior + egg strategy ===
     if (a.caste === CASTE.QUEEN) {
+      // Queen baby (new colony) behavior
+      if (a.mem.queenBaby) {
+        // Escorted out: head to surface
+        if (a.y > SURFACE_WALK_Y) {
+          moveToward(a, a.x, SURFACE_WALK_Y);
+          return;
+        }
+
+        // Find a tree to climb
+        let tx = null;
+        if (trees.length) {
+          // nearest tree
+          let best = trees[0].x, bd = 9999;
+          for (const t of trees) {
+            const d = Math.abs(wrapX(t.x) - wrapX(a.x));
+            if (d < bd) { bd = d; best = t.x; }
+          }
+          tx = best;
+        }
+        if (tx !== null) {
+          moveToward(a, tx, SURFACE_WALK_Y);
+        } else {
+          // no trees yet, wander west
+          a.x = wrapX(a.x - 1);
+        }
+
+        // Mate trigger: if a male is on this tile on surface
+        const maleHere = ants.find(an => an.team === a.mem.originTeam && an.caste === CASTE.MALE && an.y === SURFACE_WALK_Y && an.x === a.x);
+        if (maleHere) {
+          // male consumed by destiny
+          maleHere.dead = true;
+
+          // Thrive controller: successful mating within window
+          const oc = colonies.find(cc => cc.team === a.mem.originTeam);
+          if (oc && oc.thrive) {
+            oc.thrive.qbLastMateAtGS = gameSeconds;
+            oc.thrive.qbFailStreak = Math.max(0, (oc.thrive.qbFailStreak || 0) - 1);
+            oc.thrive.qbSpawnedAtGS = 0;
+            oc.maleTargetOnTrees = 1;
+          }
+
+          // Found a new color colony
+          const newTeam = a.mem.newTeam;
+          // Switch this queen baby's team and initialize colony state
+          a.team = newTeam;
+          a.mem.queenBaby = false;
+          // Clear any escorts still targeting this queen baby
+          for (const w of ants) {
+            if (w.mem.escortQueenBabyId === a.id) w.mem.escortQueenBabyId = null;
+          }
+          a.mem.founding = true;
+
+          const nc = newColony(newTeam, a.x, surfaceY + 15);
+          nc.queenId = a.id;
+          // set tiles for entrance initially
+          nc.founding.entranceX = a.x;
+          nc.founding.sealed = false;
+          // place queen at surface entrance
+          a.x = nc.homeX;
+          a.y = SURFACE_WALK_Y;
+
+          return;
+        }
+
+        return;
+      }
+
+      // Queen lifespan
+      if (a.dieAtGS && gameSeconds >= a.dieAtGS) { a.dead = true; return; }
+
       c.eggTimer += 0.15;
-      
+
+      // Founding: queen starts at surface, digs to chamber depth, seals entrance, then lays nanitics.
+      if (a.mem.founding) {
+        const ex = c.founding.entranceX;
+        // Dig vertical shaft at entrance
+        if (!c.founding.sealed) {
+          if (a.y < c.homeY) {
+            // dig down one tile per step
+            const ny = a.y + 1;
+            setTile(ex, ny, TILE.TUNNEL);
+            a.x = ex; a.y = ny;
+            c.founding.dugToY = ny;
+            return;
+          }
+          // At chamber depth: create a small chamber
+          for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+              if (inb(ex + dx, c.homeY + dy)) setTile(ex + dx, c.homeY + dy, TILE.TUNNEL);
+            }
+          }
+          // Seal (plug) the surface entrance
+          setTile(ex, SURFACE_WALK_Y, TILE.SOIL);
+          c.founding.sealed = true;
+        }
+        // Keep queen at chamber
+        a.x = ex; a.y = c.homeY;
+      }
+
+      // Egg laying logic by phase
       if (c.phase === PHASE.FOUNDING) {
-        // Lay nanitic eggs (2-4 total), then wait
+        // Lay ninantics (4-6)
+        const target = 4 + irand(0, 2);
         const naniticEggs = ants.filter(ant => ant.team === a.team && ant.caste === CASTE.EGG && ant.willBe === CASTE.NANITIC).length;
-        if (naniticEggs < 4 && c.eggTimer > 3 && c.foodStore > 2) {
+        if (naniticEggs < target && c.eggTimer > 3 && c.foodStore > 1) {
           const egg = spawnAnt(a.team, CASTE.EGG, a.x, a.y);
           egg.willBe = CASTE.NANITIC;
+          c.foodStore -= 1;
+          c.eggTimer = 0;
+        }
+        if (c.founding.sealed && c.naniticCount >= 1) c.phase = PHASE.NANITIC;
+      } else if (c.phase === PHASE.NANITIC) {
+        // Once nanitics have food coming in, start worker era
+        if (c.foodStore >= 18 && c.naniticCount >= 2) {
+          c.phase = PHASE.GROWING;
+          // Any surviving ninantics are fed to the queen at this point
+          for (let i = ants.length - 1; i >= 0; i--) {
+            const an = ants[i];
+            if (an.team === a.team && an.caste === CASTE.NANITIC) {
+              c.foodStore += 3;
+              an.dead = true;
+              ants.splice(i, 1);
+            }
+          }
+          c.naniticCount = 0;
+        }
+      } else if (c.phase === PHASE.GROWING) {
+        // Lay worker eggs (female workers) and some males
+        const workerEggs = ants.filter(ant => ant.team === a.team && ant.caste === CASTE.EGG && ant.willBe === CASTE.WORKER).length;
+        const maleEggs = ants.filter(ant => ant.team === a.team && ant.caste === CASTE.EGG && ant.willBe === CASTE.MALE).length;
+
+        if (c.eggTimer > 2 && c.foodStore > 2) {
+          const egg = spawnAnt(a.team, CASTE.EGG, a.x, a.y);
+          // Adaptive male chance (aim: at least one male on a tree somewhere)
+          const maleChance = c.maleEggChance ?? 0.08;
+          if (Math.random() < maleChance && maleEggs < 4) egg.willBe = CASTE.MALE;
+          else egg.willBe = CASTE.WORKER;
           c.foodStore -= 2;
           c.eggTimer = 0;
         }
-        // Transition to NANITIC phase when first nanitic hatches
-        if (c.naniticCount >= 1) {
-          c.phase = PHASE.NANITIC;
+
+        // When the new batch of eggs hatch, they are all female workers (we approximate by reaching workerCount)
+        if (c.workerCount >= 6) {
+          // Lay 4-6 explorers
+          const explorers = ants.filter(ant => ant.team === a.team && ant.caste === CASTE.EXPLORER).length;
+          if (explorers < 4) {
+            const n = 4 + irand(0, 2);
+            for (let k = 0; k < n; k++) spawnAnt(a.team, CASTE.EXPLORER, a.x, a.y);
+          }
+          c.phase = PHASE.MATURE;
         }
-      } else if (c.phase === PHASE.NANITIC) {
-        // Wait for nanitics to bring food; transition to GROWING when fed
-        if (c.foodStore >= 15 && c.naniticCount >= 2) {
-          c.phase = PHASE.GROWING;
-        }
-      } else if (c.phase === PHASE.GROWING || c.phase === PHASE.MATURE) {
-        // Lay worker eggs when food available
+      } else if (c.phase === PHASE.MATURE) {
+        // Mature: continue laying workers, and produce warriors when foreign corpses are fed.
         if (c.eggTimer > 2 && c.foodStore > 3) {
           const egg = spawnAnt(a.team, CASTE.EGG, a.x, a.y);
           egg.willBe = CASTE.WORKER;
           c.foodStore -= 3;
           c.eggTimer = 0;
         }
-        if (c.workerCount >= 5) {
-          c.phase = PHASE.MATURE;
+
+        if (c.foreignFed > 0) {
+          const n = 4 + irand(0, 2);
+          for (let k = 0; k < n; k++) spawnAnt(a.team, CASTE.WARRIOR, a.x, a.y);
+          c.foreignFed = 0;
         }
       }
+
       return;
     }
     
@@ -584,59 +1099,265 @@
       stepWorker(a, c);
       return;
     }
+
+    // === EXPLORER: long-range forage + pheromone trails ===
+    if (a.caste === CASTE.EXPLORER) {
+      stepExplorer(a, c);
+      return;
+    }
+
+    // === WARRIOR: defend colony, retrieve foreign corpses ===
+    if (a.caste === CASTE.WARRIOR) {
+      stepWarrior(a, c);
+      return;
+    }
+
+    // === MALE: escorted out to surface then despawn ===
+    if (a.caste === CASTE.MALE) {
+      stepMale(a, c);
+      return;
+    }
   }
 
   function stepNanitic(a, c) {
-    // Priority: if carrying food, go to queen. Else, go to surface and find food.
+    // Ninantics purpose:
+    // - Unplug the hole (open the sealed entrance)
+    // - Find food, feed the queen
+    // - Store eggs away from queen to make room
+
+    // 1) Unplug entrance if sealed
+    const ex = c.founding.entranceX;
+    if (c.founding.sealed && tileAt(ex, SURFACE_WALK_Y) !== TILE.TUNNEL) {
+      moveToward(a, ex, SURFACE_WALK_Y);
+      if (a.x === ex && a.y === SURFACE_WALK_Y) {
+        setTile(ex, SURFACE_WALK_Y, TILE.TUNNEL); // unplug
+        c.founding.sealed = false;
+      }
+      return;
+    }
+
+    // 2) If not carrying, try to relocate eggs away from queen
+    if (!a.carried && Math.random() < 0.20) {
+      const egg = ants.find(an => an.team === a.team && an.caste === CASTE.EGG && wrappedDist(an.x, an.y, c.homeX, c.homeY) <= 1);
+      if (egg) {
+        // "store" egg by moving it a few tiles away in the chamber
+        egg.x = wrapX(c.homeX + irand(-3, 3));
+        egg.y = clamp(c.homeY + irand(-2, 2), surfaceY + 2, H - 2);
+        return;
+      }
+    }
+
+    // 3) Forage loop
     if (a.carried) {
-      // Heading home with food
       moveToward(a, c.homeX, c.homeY);
       if (wrappedDist(a.x, a.y, c.homeX, c.homeY) < 3) {
-        // Deliver food
-        if (a.carriedKind === 'leaf' || a.carriedKind === 'apple' || a.carriedKind === 'protein') {
+        if (a.carriedKind === 'leaf' || a.carriedKind === 'protein' || a.carriedKind === 'apple' || a.carriedKind === 'mealworm_egg') {
           c.foodStore += 5;
+          diag.foodGathered++;
+        } else if (a.carriedKind === 'corpse') {
+          // Foreign corpse only triggers warriors when delivered by WARRIORS (see stepWarrior)
+          c.foodStore += (a.carried.bonusFood || a.carried.food || 5);
           diag.foodGathered++;
         }
         dropCarried(a);
       }
-    }
-
-    // Decide state
-    if (a.carried) {
-      a.state = ANT_STATE.CARRY;
     } else {
-      // Look for food on surface or nearby (nanitics forage)
-      const food = findNearestResource(a, ['leaf', 'apple', 'protein']);
+      const food = findNearestResource(a, ['leaf', 'protein', 'corpse', 'apple', 'mealworm_egg']);
       if (food) {
         moveToward(a, food.x, food.y);
-        if (a.x === food.x && a.y === food.y) {
-          pickUp(a, food);
+        if (a.x === food.x && a.y === food.y) pickUp(a, food);
+      } else {
+        if (a.y > SURFACE_WALK_Y) moveToward(a, a.x, SURFACE_WALK_Y);
+        else wanderSurface(a);
+      }
+    }
+  }
+
+  function foodTrailStrength(kind) {
+    if (kind === 'corpse') return 10;
+    if (kind === 'protein') return 8;
+    if (kind === 'apple' || kind === 'rotten_apple') return 7;
+    if (kind === 'leaf') return 4;
+    return 3;
+  }
+
+  function stepExplorer(a, c) {
+    // Explorers: range further, remember best food, recruit workers, and lay pheromone trails.
+    if (a.carried) {
+      // Lay pheromone trail back home (surface only), stronger for better food
+      if (a.y === SURFACE_WALK_Y) addPherFood(a.x, a.y, foodTrailStrength(a.carriedKind) * 0.8);
+
+      moveToward(a, c.homeX, c.homeY);
+      if (wrappedDist(a.x, a.y, c.homeX, c.homeY) < 3) {
+        if (a.carriedKind === 'corpse') {
+          c.foodStore += (a.carried.bonusFood || a.carried.food || 5);
+        } else {
+          c.foodStore += 6;
+        }
+        diag.foodGathered++;
+        // Remember this as "best food" for a while (helps repeat visits)
+        a.mem.bestFood = { x: a.carried.x, y: a.carried.y, kind: a.carriedKind, untilGS: gameSeconds + 6 * GS_HOUR };
+        dropCarried(a);
+      }
+      return;
+    }
+
+    // If we remember a strong source, bias movement toward it
+    if (a.mem.bestFood && gameSeconds < a.mem.bestFood.untilGS) {
+      moveToward(a, a.mem.bestFood.x, a.mem.bestFood.y);
+    }
+
+    // Seek food farther out
+    const food = findNearestResource(a, ['leaf', 'protein', 'corpse', 'apple', 'rotten_apple']);
+    if (food && wrappedDist(a.x, a.y, food.x, food.y) < 80) {
+      moveToward(a, food.x, food.y);
+
+      // When near a good source, recruit workers to haul it.
+      const dist = wrappedDist(a.x, a.y, food.x, food.y);
+      if (dist <= 2 && a.y === SURFACE_WALK_Y) {
+        const score = 10 + foodTrailStrength(food.kind) * 2;
+        addRecruit(a.team, food.x, food.y, food.kind, score, 4 * GS_HOUR);
+        // Also spike pheromone at the source
+        addPherFood(food.x, SURFACE_WALK_Y, foodTrailStrength(food.kind) * 3);
+      }
+
+      if (a.x === food.x && a.y === food.y) pickUp(a, food);
+    } else {
+      // Long wander on surface
+      if (a.y > SURFACE_WALK_Y) moveToward(a, a.x, SURFACE_WALK_Y);
+      else {
+        const dir = choice([-1, 1]);
+        a.x = wrapX(a.x + dir);
+      }
+    }
+  }
+
+  function stepWarrior(a, c) {
+    // Ensure only 1 warrior stays guarding the colony
+    const guardExists = ants.some(an => an.team === a.team && an.caste === CASTE.WARRIOR && an.mem.guard);
+    if (!guardExists) a.mem.guard = true;
+
+    if (a.mem.guard) {
+      moveToward(a, c.homeX, c.homeY);
+    } else {
+      // Patrol surface and retrieve foreign corpses
+      if (a.carried) {
+        moveToward(a, c.homeX, c.homeY);
+        if (wrappedDist(a.x, a.y, c.homeX, c.homeY) < 3) {
+          if (a.carriedKind === 'corpse' && a.carried.team !== undefined && a.carried.team !== a.team) {
+            c.foreignFed++;
+            c.foodStore += (a.carried.bonusFood || a.carried.food || 5);
+          }
+          dropCarried(a);
         }
       } else {
-        // Go to surface to search
-        if (a.y > SURFACE_WALK_Y) {
-          moveToward(a, a.x, SURFACE_WALK_Y);
+        const corpse = resources.find(r => r.kind === 'corpse' && !r.carried && r.team !== undefined && r.team !== a.team);
+        if (corpse) {
+          moveToward(a, corpse.x, corpse.y);
+          if (a.x === corpse.x && a.y === corpse.y) pickUp(a, corpse);
         } else {
-          // Wander on surface
-          wanderSurface(a);
+          if (a.y > SURFACE_WALK_Y) moveToward(a, a.x, SURFACE_WALK_Y);
+          else wanderSurface(a);
         }
       }
     }
 
+    // Combat: attack nearby enemy ants/mobs
+    for (const enemy of ants) {
+      if (enemy.team !== a.team && enemy.x === a.x && enemy.y === a.y && enemy.hp > 0) {
+        enemy.hp -= Math.max(1, a.atk - 2);
+      }
+    }
+    for (const m of mobs) {
+      if (m.x === a.x && m.y === a.y && !m.dead) {
+        m.hp -= Math.max(1, a.atk - (m.def || 0) * 0.1);
+        if (m.hp <= 0) m.dead = true;
+      }
+    }
+  }
+
+  function stepMale(a, c) {
+    // Male ants climb trees, eat apples, until a royal lady ant (queen baby) climbs up.
+    if (a.y > SURFACE_WALK_Y) {
+      moveToward(a, a.x, SURFACE_WALK_Y);
+      return;
+    }
+
+    // Prefer to sit on a tree x
+    if (trees.length) {
+      let best = trees[0].x, bd = 9999;
+      for (const t of trees) {
+        const d = Math.abs(wrapX(t.x) - wrapX(a.x));
+        if (d < bd) { bd = d; best = t.x; }
+      }
+      moveToward(a, best, SURFACE_WALK_Y);
+    } else {
+      a.x = wrapX(a.x - 1);
+    }
+
+    // Eat apples on the tree tile
+    const apple = resources.find(r => !r.dead && !r.carried && (r.kind === 'apple' || r.kind === 'rotten_apple') && r.x === a.x && r.y === SURFACE_WALK_Y);
+    if (apple) {
+      // Consume: boost energy a bit
+      a.e = Math.min(a.eMax, a.e + 15);
+      const ii = resources.indexOf(apple);
+      if (ii > -1) resources.splice(ii, 1);
+    }
+
+    // If a queen baby is here, mating is handled in the queen baby logic (she founds a colony).
+
+    // Idle life
+    if (Math.random() < 0.02) a.dead = true;
   }
 
   function stepWorker(a, c) {
+    // Escort queen baby out (2-4 workers)
+    if (c.queenBabyId !== -1) {
+      const qb = ants.find(an => an.id === c.queenBabyId);
+      if (qb && qb.mem.queenBaby) {
+        const escorts = ants.filter(an => an.team === c.team && an.caste === CASTE.WORKER && an.mem.escortQueenBabyId === qb.id);
+        if (a.caste === CASTE.WORKER) {
+          if (a.mem.escortQueenBabyId === qb.id || (escorts.length < 4 && Math.random() < 0.03)) {
+            a.mem.escortQueenBabyId = qb.id;
+            // Follow and defend
+            moveToward(a, qb.x, qb.y);
+
+            // Attack threats on contact
+            for (const m of mobs) {
+              if (!m.dead && m.x === a.x && m.y === a.y) {
+                m.hp -= Math.max(1, a.atk - (m.def || 0) * 0.1);
+                if (m.hp <= 0) m.dead = true;
+              }
+            }
+            for (const en of ants) {
+              if (en.team !== a.team && en.x === a.x && en.y === a.y && en.hp > 0) {
+                en.hp -= Math.max(1, a.atk - 2);
+              }
+            }
+            return;
+          }
+        }
+      }
+    }
+
     // Assign role if idle
     if (a.role === ROLE.IDLE) {
-      // Role priority: feed queen if low food, else dig if young colony, else forage
-      if (c.foodStore < 5) {
+      // If explorers posted a recruit signal, latch on and run a dedicated haul.
+      const s = bestRecruitFor(a.team, a.x, a.y);
+      if (s) {
+        a.mem.follow = { x: s.x, y: s.y, kind: s.kind, untilGS: gameSeconds + 3 * GS_HOUR };
         a.role = ROLE.FORAGE;
-      } else if (c.workerCount < 10 && Math.random() < 0.5) {
-        a.role = ROLE.DIG;
-      } else if (a.carried && a.carriedKind === 'dirt') {
-        a.role = ROLE.HAUL_DIRT;
       } else {
-        a.role = ROLE.FORAGE;
+        // Role priority: feed queen if low food, else dig if young colony, else forage
+        if (c.foodStore < 5) {
+          a.role = ROLE.FORAGE;
+        } else if (c.workerCount < 10 && Math.random() < 0.5) {
+          a.role = ROLE.DIG;
+        } else if (a.carried && a.carriedKind === 'dirt') {
+          a.role = ROLE.HAUL_DIRT;
+        } else {
+          a.role = ROLE.FORAGE;
+        }
       }
     }
     
@@ -644,15 +1365,38 @@
       if (a.carried) {
         moveToward(a, c.homeX, c.homeY);
         if (wrappedDist(a.x, a.y, c.homeX, c.homeY) < 3) {
-          if (a.carriedKind === 'leaf' || a.carriedKind === 'apple' || a.carriedKind === 'protein') {
+          if (a.carriedKind === 'leaf' || a.carriedKind === 'protein' || a.carriedKind === 'apple' || a.carriedKind === 'rotten_apple') {
             c.foodStore += 5;
+            diag.foodGathered++;
+          } else if (a.carriedKind === 'corpse') {
+            c.foodStore += (a.carried.bonusFood || a.carried.food || 5);
             diag.foodGathered++;
           }
           dropCarried(a);
           a.role = ROLE.IDLE;
         }
       } else {
-        const food = findNearestResource(a, ['leaf', 'apple', 'protein']);
+        // If following an explorer recruit, go to that target first
+        if (a.mem.follow && gameSeconds < a.mem.follow.untilGS) {
+          moveToward(a, a.mem.follow.x, a.mem.follow.y);
+          // If we reached the follow target, try to pick up that kind
+          if (a.x === a.mem.follow.x && a.y === a.mem.follow.y) {
+            const target = resources.find(r => !r.dead && !r.carried && r.x === a.x && r.y === a.y && r.kind === a.mem.follow.kind);
+            if (target) pickUp(a, target);
+            a.mem.follow = null;
+          }
+        }
+
+        // Workers prefer following pheromone trails on surface
+        if (a.y === SURFACE_WALK_Y) {
+          const here = pherAt(a.x, a.y);
+          const l = pherAt(a.x - 1, a.y);
+          const r = pherAt(a.x + 1, a.y);
+          if (l > here + 0.5 || r > here + 0.5) {
+            a.x = wrapX(a.x + ((r > l) ? 1 : -1));
+          }
+        }
+        const food = findNearestResource(a, ['leaf', 'protein', 'corpse', 'apple', 'rotten_apple']);
         if (food) {
           moveToward(a, food.x, food.y);
           if (a.x === food.x && a.y === food.y) pickUp(a, food);
@@ -796,8 +1540,8 @@
     r.carried = false;
     r.x = a.x;
     r.y = a.y;
-    // If food, remove from world (consumed)
-    if (r.kind === 'leaf' || r.kind === 'apple' || r.kind === 'protein') {
+    // If consumed resource, remove from world
+    if (r.kind === 'leaf' || r.kind === 'protein' || r.kind === 'corpse') {
       const idx = resources.indexOf(r);
       if (idx > -1) resources.splice(idx, 1);
     }
@@ -806,223 +1550,192 @@
   }
 
   function stepMob(m) {
-    const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
-    let move = choice(dirs);
-    const nx = wrapX(m.x + move[0]);
-    const ny = m.y + move[1];
+    // Lifespan expiry
+    if (m.dieAtGS && gameSeconds >= m.dieAtGS) { m.dead = true; return; }
 
-    let canPass = false;
-    if (m.type === 'worm') canPass = inb(nx, ny);
-    else canPass = passableForAnt(nx, ny) || (ny === SURFACE_WALK_Y);
-
-    if (canPass) {
-      m.x = nx; m.y = ny;
-      if (m.type === 'worm' && isSoil(nx, ny)) setTile(nx, ny, TILE.TUNNEL);
+    // Lifecycle stage progression
+    if (m.stage === STAGE.EGG) {
+      // Eggs mostly sit still
+      if (m.hatchAtGS && gameSeconds >= m.hatchAtGS) {
+        m.stage = STAGE.JUV;
+        // Juvenile->Adult timer varies by species
+        if (!m.adultAtGS) {
+          if (m.type === 'worm') {
+            // Juvenile to Adult (10–55 weeks) => 35h to 192.5h game time
+            m.adultAtGS = gameSeconds + irand(35 * GS_HOUR, Math.floor(192.5 * GS_HOUR));
+          } else {
+            m.adultAtGS = gameSeconds + irand(6 * GS_HOUR, 18 * GS_HOUR);
+          }
+        }
+      }
+      return;
     }
+    if (m.stage === STAGE.JUV && m.adultAtGS && gameSeconds >= m.adultAtGS) {
+      m.stage = STAGE.ADULT;
+    }
+
+    // Update stage stats every step (cheap, ensures correctness)
+    const base = (
+      m.type === 'worm' ? { hp: 120, atk: 6, def: 10, food: 12, life: 40 * GS_DAY } :
+      m.type === 'mealworm' ? { hp: 55, atk: 5, def: 9, food: 10, life: 25 * GS_DAY } :
+      m.type === 'beetle' ? { hp: 75, atk: 10, def: 10, food: 16, life: 18 * GS_DAY } :
+      m.type === 'spider' ? { hp: 90, atk: 16, def: 8, food: 14, life: 22 * GS_DAY } :
+      { hp: 50, atk: 10, def: 10, food: 10, life: 20 * GS_DAY }
+    );
+    applyStageStats(m, base);
+
+    // Behavior by type
+    const phase = currentPhase();
+
+    if (m.type === 'beetle') {
+      stepBeetle(m, phase);
+    } else if (m.type === 'mealworm') {
+      stepMealworm(m);
+    } else if (m.type === 'worm') {
+      stepEarthworm(m);
+    } else {
+      stepPredatorLike(m);
+    }
+
+    // Combat contact vs ants (very simple)
     for (const a of ants) {
       if (a.x === m.x && a.y === m.y) {
-        a.hp -= 20;
+        a.hp -= Math.max(1, m.atk - 2);
         a._killedByMob = true;
       }
     }
   }
 
-  /* =========================================================
-     4b) Trees, falling resources, and sky helpers
-  ========================================================= */
-  function initSkyAndTrees() {
-    // Clouds
-    sky.clouds.length = 0;
-    const n = 10;
-    for (let i = 0; i < n; i++) {
-      sky.clouds.push({
-        x: Math.random() * W,
-        y: 6 + Math.random() * (surfaceY - 10),
-        r: 14 + Math.random() * 22,
-        a: 0.08 + Math.random() * 0.16,
-        vx: (0.6 + Math.random() * 1.2) * (Math.random() < 0.5 ? -1 : 1)
+  function stepPredatorLike(m) {
+    const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+    const move = choice(dirs);
+    const nx = wrapX(m.x + move[0]);
+    const ny = m.y + move[1];
+    const canPass = passableForAnt(nx, ny) || (ny === SURFACE_WALK_Y);
+    if (canPass) { m.x = nx; m.y = ny; }
+  }
+
+  function isLeafAtSurface(x) {
+    return resources.some(r => !r.dead && !r.carried && r.kind === 'leaf' && r.y === SURFACE_WALK_Y && r.x === wrapX(x));
+  }
+
+  function stepMealworm(m) {
+    // Mealworms mostly hang around leaf litter and mate under leaves.
+    // Mating chance: 10% when under leaves (surface), then lay egg nearby.
+    if (m.y > SURFACE_WALK_Y) {
+      // move up toward surface
+      m.y -= 1;
+      return;
+    }
+    // surface wander
+    const nx = wrapX(m.x + choice([-1, 1, 0]));
+    m.x = nx;
+
+    if (gameSeconds > m.mateCooldownAtGS && isLeafAtSurface(m.x) && Math.random() < 0.10) {
+      // spawn egg under leaves (same tile)
+      spawnMob('mealworm', m.x, SURFACE_WALK_Y, {
+        stage: STAGE.EGG,
+        hatchAtGS: gameSeconds + 4 * GS_HOUR,
+        adultAtGS: gameSeconds + 18 * GS_HOUR,
+        lifespanGS: 25 * GS_DAY
       });
-    }
-
-    // Trees
-    trees.length = 0;
-    const treeCount = 8;
-    for (let i = 0; i < treeCount; i++) {
-      const x = (i + 0.5) * (W / treeCount) + irand(-6, 6);
-      trees.push({
-        x,
-        y: SURFACE_WALK_Y,
-        leafTimer: 2 + Math.random() * 5,
-        pollinatedUntilT: 0,
-        appleWindowEndT: 0,
-        nextAppleT: 0
-      });
+      m.mateCooldownAtGS = gameSeconds + 6 * GS_HOUR;
     }
   }
 
-  function tickClouds(dt) {
-    for (const c of sky.clouds) {
-      c.x = wrapX(c.x + c.vx * dt);
-      // gentle bob
-      c.y += Math.sin((sky.t * 0.35) + c.x * 0.1) * dt * 0.2;
-      c.y = clamp(c.y, 3, Math.max(3, surfaceY - 6));
+  function stepEarthworm(m) {
+    // Earthworms dig tunnels; eggs deposited in moist leaf litter.
+    // Worms mate chance: 2%
+    // Eggs hatch in 7h game time.
+    const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+    const move = choice(dirs);
+    const nx = wrapX(m.x + move[0]);
+    const ny = m.y + move[1];
+
+    // Prefer underground
+    if (ny <= SURFACE_WALK_Y) {
+      m.y = Math.min(H - 2, m.y + 1);
+    } else if (inb(nx, ny)) {
+      m.x = nx; m.y = ny;
+      if (isSoil(nx, ny)) setTile(nx, ny, TILE.TUNNEL);
     }
-  }
 
-  function treeHasPollination(tr) {
-    return (sky.t < (tr.pollinatedUntilT || 0)) && (sky.t < (tr.appleWindowEndT || 0));
-  }
-
-  function tickTrees(dt) {
-    // Pollination: ants, beetles, spiders visiting tree. Worms/mealworms do not count.
-    for (const tr of trees) {
-      // Check visitors near the tree (surface only)
-      let pollinatorNear = false;
-      for (const a of ants) {
-        if (a.hp <= 0) continue;
-        if (a.y !== SURFACE_WALK_Y) continue;
-        if (wrappedDist(a.x, a.y, tr.x, tr.y) <= 2) { pollinatorNear = true; break; }
-      }
-      if (!pollinatorNear) {
-        for (const m of mobs) {
-          if (m.type !== 'beetle' && m.type !== 'spider') continue;
-          if (m.y !== SURFACE_WALK_Y) continue;
-          if (wrappedDist(m.x, m.y, tr.x, tr.y) <= 2) { pollinatorNear = true; break; }
-        }
-      }
-
-      if (pollinatorNear) {
-        // Keep pollinated for 7 days; apple window extends 30 days from last pollination.
-        tr.pollinatedUntilT = sky.t + 7 * DAY_SEC;
-        tr.appleWindowEndT = sky.t + MONTH_SEC;
-        if (!tr.nextAppleT || tr.nextAppleT < sky.t) tr.nextAppleT = sky.t + WEEK_SEC;
-      }
-
-      // Leaves: always drop
-      tr.leafTimer -= dt;
-      if (tr.leafTimer <= 0) {
-        tr.leafTimer = 1.6 + Math.random() * 4.5;
-        addRes('leaf', tr.x + irand(-1, 1), tr.y - 2, { falling: true, vy: 0 });
-      }
-
-      // Apples: only if pollinated + in window; weekly
-      if (treeHasPollination(tr)) {
-        if (!tr.nextAppleT) tr.nextAppleT = sky.t + WEEK_SEC;
-        if (sky.t >= tr.nextAppleT) {
-          tr.nextAppleT = sky.t + WEEK_SEC;
-          addRes('apple', tr.x + irand(-1, 1), tr.y - 3, { falling: true, vy: 0 });
-        }
+    // Mate deep underground (we interpret mating action underground), but deposit eggs in moist leaf litter.
+    if (gameSeconds > m.mateCooldownAtGS && m.y > surfaceY + 8 && Math.random() < 0.02) {
+      // Find a nearby surface leaf-litter tile (moist + leaf)
+      const sx = m.x;
+      if (isLeafAtSurface(sx) && moisture[idx(wrapX(sx), surfaceY)] >= 0.25) {
+        spawnMob('worm', sx, SURFACE_WALK_Y, {
+          stage: STAGE.EGG,
+          hatchAtGS: gameSeconds + 7 * GS_HOUR,
+          lifespanGS: 40 * GS_DAY
+        });
+        m.mateCooldownAtGS = gameSeconds + 10 * GS_HOUR;
       }
     }
   }
 
-  function decayFood(dt) {
-    for (const r of resources) {
-      if (r.dead) continue;
-      if (r.kind === 'dirt') continue;
+  function stepBeetle(m, phase) {
+    // Beetles: dig to eat until maxed out food capacity, dig up,
+    // wait for night, mate on surface at night (30%), dig down, lay egg,
+    // die when out of energy, deposit into root-dirt.
 
-      const ageSec = (sky.t - (r.bornT || 0));
-      const ageDays = ageSec / DAY_SEC;
+    // energy drain
+    m.e -= 0.6;
+    if (m.e <= 0) { m.dead = true; return; }
 
-      // Defaults: slow decay
-      let food = r.baseFood;
+    if (m.state === 'wander') m.state = 'feed';
 
-      if (r.kind === 'apple') {
-        // Rot in 3 days (linear -> 0)
-        const t = clamp(ageDays / 3, 0, 1);
-        food = r.baseFood * (1 - t);
-      } else if (r.kind === 'leaf') {
-        // Dry in 4 days: treat as "fresh" until day 4, then steep decay after.
-        if (ageDays < 4) {
-          food = r.baseFood * (1 - 0.25 * (ageDays / 4));
+    if (m.state === 'feed') {
+      // go underground and "eat" by digging (simple proxy)
+      if (m.y <= surfaceY + 2) { m.y += 1; return; }
+      const d = choice([[1, 0], [-1, 0], [0, 1]]);
+      const nx = wrapX(m.x + d[0]);
+      const ny = m.y + d[1];
+      if (inb(nx, ny)) {
+        m.x = nx; m.y = ny;
+        if (isSoil(nx, ny)) setTile(nx, ny, TILE.TUNNEL);
+        m.foodHeld = clamp(m.foodHeld + 1, 0, m.foodCap);
+      }
+      if (m.foodHeld >= m.foodCap) {
+        m.state = 'surface';
+      }
+      return;
+    }
+
+    if (m.state === 'surface') {
+      // Dig up to surface
+      if (m.y > SURFACE_WALK_Y) { m.y -= 1; return; }
+      // On surface: day => idle or go down, night => attempt mate
+      if (!phase.isNight) {
+        if (Math.random() < 0.5) {
+          // idle
         } else {
-          const t = clamp((ageDays - 4) / 6, 0, 1); // 6 more days to near-zero
-          food = lerp(r.baseFood * 0.75, 0, t);
+          m.state = 'feed';
         }
-      } else if (r.kind === 'protein') {
-        // Protein decays but slower
-        const t = clamp(ageDays / 6, 0, 1);
-        food = r.baseFood * (1 - 0.6 * t);
+        return;
       }
-
-      r.food = Math.max(0, food);
-      // Auto-delete when worthless (keeps counts stable)
-      if (r.food <= 0.05 && ageDays > 3) r.dead = true;
-    }
-    // Cull dead
-    for (let i = resources.length - 1; i >= 0; i--) {
-      if (resources[i].dead) resources.splice(i, 1);
-    }
-  }
-
-  function tickFallingResources(dt) {
-    for (const r of resources) {
-      if (r.carried) continue;
-      // Anything above surface may fall if flagged
-      if (r.falling) {
-        r.vy += dt * 28; // gravity
-        r.y += r.vy * dt;
-        if (r.y >= SURFACE_WALK_Y) {
-          r.y = SURFACE_WALK_Y;
-          r.falling = false;
-          r.vy = 0;
-        }
+      // Night
+      if (gameSeconds > m.mateCooldownAtGS && Math.random() < 0.30) {
+        m.state = 'lay';
+        m.mateCooldownAtGS = gameSeconds + 8 * GS_HOUR;
       }
+      return;
     }
-  }
 
-  function drawSky() {
-    // Sky occupies everything above the surface line in screen space.
-    const surf = worldToScreen(camera.x, SURFACE_WALK_Y).sy;
-    const skyBottom = clamp(surf + camera.scale, 0, innerHeight);
-
-    // day/night cycle (1 day = 30 minutes)
-    const dayPhase = (sky.t / DAY_SEC) % 1; // 0..1
-    const dayT = (Math.sin(dayPhase * Math.PI * 2 - Math.PI / 2) * 0.5 + 0.5); // 0..1
-    const topCol = `rgb(${Math.floor(lerp(6, 38, dayT))},${Math.floor(lerp(9, 86, dayT))},${Math.floor(lerp(18, 140, dayT))})`;
-    const botCol = `rgb(${Math.floor(lerp(3, 120, dayT))},${Math.floor(lerp(4, 170, dayT))},${Math.floor(lerp(10, 210, dayT))})`;
-
-    const grad = ctx.createLinearGradient(0, 0, 0, skyBottom);
-    grad.addColorStop(0, topCol);
-    grad.addColorStop(1, botCol);
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, innerWidth, skyBottom);
-
-    // Sun / Moon across the sky
-    const orbXw = wrapX(W * (0.1 + 0.8 * dayPhase));
-    const orbYw = 8 + (1 - dayT) * 10;
-    const s = worldToScreen(orbXw, orbYw);
-    const orbR = 10 + 12 * Math.max(0.2, dayT);
-
-    const isDay = dayT > 0.35;
-    ctx.globalAlpha = isDay ? (0.55 * dayT) : 0.22;
-    ctx.fillStyle = isDay ? "#ffd26a" : "#cfe2ff";
-    ctx.beginPath();
-    ctx.arc(s.sx, s.sy, orbR, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.globalAlpha = 1;
-
-    // Expose time to UI (menu orb)
-    window.SWARM_TIME = {
-      dayPhase,
-      dayT,
-      isDay,
-      light: { x: s.sx, y: s.sy }
-    };
-
-    // Clouds (simple circles)
-    for (const cl of sky.clouds) {
-      const ss = worldToScreen(cl.x, cl.y);
-      if (ss.sy < -60 || ss.sy > skyBottom + 60) continue;
-      if (ss.sx < -200 || ss.sx > innerWidth + 200) continue;
-      ctx.globalAlpha = cl.a;
-      ctx.fillStyle = "#ffffff";
-      ctx.beginPath();
-      ctx.arc(ss.sx, ss.sy, cl.r, 0, Math.PI * 2);
-      ctx.arc(ss.sx + cl.r * 0.9, ss.sy + cl.r * 0.1, cl.r * 0.7, 0, Math.PI * 2);
-      ctx.arc(ss.sx - cl.r * 0.8, ss.sy + cl.r * 0.15, cl.r * 0.6, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.globalAlpha = 1;
+    if (m.state === 'lay') {
+      // Dig down a bit and lay egg, then continue until energy runs out
+      if (m.y <= surfaceY + 6) { m.y += 1; return; }
+      // lay egg underground
+      spawnMob('beetle', m.x, m.y, {
+        stage: STAGE.EGG,
+        hatchAtGS: gameSeconds + 6 * GS_HOUR,
+        adultAtGS: gameSeconds + 24 * GS_HOUR,
+        lifespanGS: 18 * GS_DAY
+      });
+      m.state = 'feed';
+      m.foodHeld = 0;
+      return;
     }
   }
 
@@ -1032,6 +1745,17 @@
     balanceTimer += dt;
     if (balanceTimer < 2.0) return;
     balanceTimer = 0;
+
+    // Detect colony extinction: if queen missing, schedule respawn +1 in-game day.
+    for (const c of colonies) {
+      if (c.queenId !== -1) {
+        const qAlive = ants.some(a => a.id === c.queenId && a.caste === CASTE.QUEEN);
+        if (!qAlive) {
+          c.queenId = -1;
+          if (!c.respawnAtGS) c.respawnAtGS = gameSeconds + GAME_DAY_SECONDS;
+        }
+      }
+    }
 
     if (PLAY_FLAGS.ant_orange && colonies[0].queenId === -1) respawnColony(0);
     if (PLAY_FLAGS.ant_cyan && colonies[1].queenId === -1) respawnColony(1);
@@ -1048,6 +1772,7 @@
     mobs.length = 0;
     resources.length = 0;
     plants.length = 0;
+    trees.length = 0;
     genWorld();
     if (PLAY_FLAGS.ant_orange) respawnColony(0);
     if (PLAY_FLAGS.ant_cyan) respawnColony(1);
@@ -1059,6 +1784,7 @@
         let i = idx(x, y);
         tile[i] = (y < surfaceY) ? TILE.AIR : TILE.SOIL;
         moisture[i] = (y < surfaceY) ? 0 : 0.5;
+        rootMass[i] = 0;
         if (y > surfaceY + 10 && Math.random() < 0.05) tile[i] = TILE.ROCKS;
       }
     }
@@ -1071,21 +1797,19 @@
     for (let x = 0; x < W; x += 4) {
       if (Math.random() < 0.5) plants.push({ x, e: 10, bloom: 0 });
     }
-
-    initSkyAndTrees();
   }
 
   /* =========================================================
      5) Rendering with Emojis
   ========================================================= */
   function draw() {
-    // Sky + background
-    drawSky();
-    // Fill below the visible sky (ground/backdrop)
-    const surf = worldToScreen(camera.x, SURFACE_WALK_Y).sy;
-    const skyBottom = clamp(surf + camera.scale, 0, innerHeight);
+    // Clear screen
     ctx.fillStyle = "#05060a";
-    ctx.fillRect(0, skyBottom, innerWidth, innerHeight - skyBottom);
+    ctx.fillRect(0, 0, innerWidth, innerHeight); // This assumes identity transform or consistent?
+    // Wait! ctx.fillRect uses context logical units. 
+    // With setTransform in resize, 1 unit = 1 logical pixel.
+    // But innerWidth is logical pixels. So if DPR=2, rect is correct logical size.
+    // And we scaled up by DPR, so this fills canvas. Correct.
 
     // Debug: Check Camera
     if (isNaN(camera.x) || isNaN(camera.y)) {
@@ -1120,6 +1844,7 @@
 
         if (t === TILE.SOIL) ctx.fillStyle = "#3d2e24";
         else if (t === TILE.TUNNEL) ctx.fillStyle = "#1a120d";
+        else if (t === TILE.ROOT_DIRT) ctx.fillStyle = "#2b1f18";
         else if (t >= TILE.ROCKS) ctx.fillStyle = "#555";
 
         // Fill rect for tile
@@ -1132,19 +1857,23 @@
     ctx.textBaseline = "middle";
     ctx.font = `${Math.floor(camera.scale * 1.5)}px sans-serif`;
 
-    // Trees
-    loopDraw((off) => {
-      for (const tr of trees) {
-        const s = worldToScreen(tr.x + off, tr.y);
-        if (s.sx >= -80 && s.sx <= innerWidth + 80) ctx.fillText(EMOJI.TREE, s.sx, s.sy - camera.scale * 0.9);
-      }
-    });
-
-    // Small plants
     loopDraw((off) => {
       for (const p of plants) {
         const s = worldToScreen(p.x + off, SURFACE_WALK_Y);
         if (s.sx >= -50 && s.sx <= innerWidth + 50) ctx.fillText("🌿", s.sx, s.sy - camera.scale);
+      }
+    });
+
+    // Trees (grow by resizing up to 400%)
+    loopDraw((off) => {
+      for (const t of trees) {
+        const s = worldToScreen(t.x + off, SURFACE_WALK_Y);
+        if (s.sx < -80 || s.sx > innerWidth + 80) continue;
+        const size = Math.floor(camera.scale * 1.6 * (t.scale || 1));
+        ctx.save();
+        ctx.font = `${size}px sans-serif`;
+        ctx.fillText("🌳", s.sx, s.sy - camera.scale * 1.2);
+        ctx.restore();
       }
     });
     loopDraw((off) => {
@@ -1154,11 +1883,44 @@
 
         // Render based on caste
         if (a.caste === CASTE.EGG) {
-          // Small egg dot
-          ctx.fillStyle = (a.team === 0) ? "rgba(255,200,150,0.8)" : "rgba(150,220,255,0.8)";
+          // Egg rendering: show type via color/size
+          const isNaniticEgg = a.willBe === CASTE.NANITIC;
+          const isWorkerEgg = a.willBe === CASTE.WORKER;
+          const isMaleEgg = a.willBe === CASTE.MALE;
+          const r = camera.scale * (isWorkerEgg ? 0.40 : 0.30);
+          // base tint from team
+          let alpha = 0.85;
+          let col = "rgba(220,220,220,0.85)";
+          if (isNaniticEgg) col = "rgba(255,210,150,0.85)";
+          if (isWorkerEgg) col = "rgba(255,160,60,0.95)";
+          if (isMaleEgg) col = "rgba(200,200,200,0.9)";
+
+          // Apply team hue by drawing a tinted overlay ring
+          ctx.fillStyle = col;
           ctx.beginPath();
-          ctx.arc(s.sx, s.sy, camera.scale * 0.3, 0, Math.PI * 2);
+          ctx.arc(s.sx, s.sy, r, 0, Math.PI * 2);
           ctx.fill();
+
+          // team-colored rim
+          ctx.strokeStyle = teamColor(a.team);
+          ctx.lineWidth = Math.max(1, camera.scale * 0.10);
+          ctx.beginPath();
+          ctx.arc(s.sx, s.sy, r + camera.scale * 0.05, 0, Math.PI * 2);
+          ctx.stroke();
+
+          // Tiny glyph hints
+          if (isWorkerEgg) {
+            ctx.font = `${Math.floor(camera.scale * 0.9)}px sans-serif`;
+            ctx.fillStyle = "rgba(0,0,0,0.35)";
+            ctx.fillText("W", s.sx, s.sy);
+            ctx.font = `${Math.floor(camera.scale * 1.5)}px sans-serif`;
+          } else if (isNaniticEgg) {
+            ctx.font = `${Math.floor(camera.scale * 0.9)}px sans-serif`;
+            ctx.fillStyle = "rgba(0,0,0,0.30)";
+            ctx.fillText("N", s.sx, s.sy);
+            ctx.font = `${Math.floor(camera.scale * 1.5)}px sans-serif`;
+          }
+        } else if (a.caste === CASTE.QUEEN) {
         } else if (a.caste === CASTE.QUEEN) {
           // Queen: bigger ant with crown indicator
           ctx.font = `${Math.floor(camera.scale * 2)}px sans-serif`;
@@ -1178,7 +1940,7 @@
         // Team dot indicator (skip for eggs)
         if (a.caste !== CASTE.EGG) {
           ctx.beginPath();
-          ctx.fillStyle = (a.team === 0) ? "orange" : "cyan";
+          ctx.fillStyle = teamColor(a.team);
           ctx.arc(s.sx + camera.scale * 0.4, s.sy + camera.scale * 0.4, camera.scale * 0.25, 0, Math.PI * 2);
           ctx.fill();
         }
@@ -1189,6 +1951,7 @@
         const s = worldToScreen(m.x + off, m.y);
         if (s.sx < -50 || s.sx > innerWidth + 50) continue;
         if (m.type === 'beetle') ctx.fillText(EMOJI.BEETLE, s.sx, s.sy);
+        else if (m.type === 'mealworm') ctx.fillText('🪱', s.sx, s.sy);
         else if (m.type === 'worm') ctx.fillText(EMOJI.WORM, s.sx, s.sy);
         else if (m.type === 'spider') ctx.fillText(EMOJI.SPIDER, s.sx, s.sy);
       }
@@ -1199,14 +1962,53 @@
         if (s.sx < -50 || s.sx > innerWidth + 50) continue;
         let char = "?";
         if (r.kind === 'leaf') char = EMOJI.LEAF;
-        else if (r.kind === 'apple') char = EMOJI.APPLE;
         else if (r.kind === 'protein') char = EMOJI.PROTEIN;
         else if (r.kind === 'mushroom') char = EMOJI.MUSHROOM;
         else if (r.kind === 'spore') char = EMOJI.SPORE;
+        else if (r.kind === 'corpse') char = "💀";
+        else if (r.kind === 'apple') char = "🍎";
+        else if (r.kind === 'rotten_apple') char = "🍏";
         else if (r.kind === 'dirt') char = "🪨";
         ctx.fillText(char, s.sx, s.sy);
       }
     });
+
+    // === Lighting: Menu orb is the light source ===
+    // Day: yellow orb with white shine @ 100% light
+    // Night: grey orb @ 30% max light
+    try {
+      const phase = currentPhase();
+      const wrapperEl = document.getElementById('sphereWrapper');
+      if (wrapperEl) {
+        wrapperEl.dataset.phase = phase.name;
+        wrapperEl.dataset.isNight = phase.isNight ? '1' : '0';
+      }
+
+      const orbRect = (document.getElementById('menuSphere') || wrapperEl)?.getBoundingClientRect?.();
+      const cx = orbRect ? (orbRect.left + orbRect.width * 0.5) : (innerWidth - 50);
+      const cy = orbRect ? (orbRect.top + orbRect.height * 0.5) : 50;
+
+      // Darkness overlay strength scales opposite of light
+      const darkness = clamp(0.75 - 0.65 * phase.light, 0.05, 0.75);
+      ctx.save();
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.fillStyle = `rgba(0,0,0,${darkness.toFixed(3)})`;
+      ctx.fillRect(0, 0, innerWidth, innerHeight);
+
+      // Cut out a radial light cone centered on the orb
+      ctx.globalCompositeOperation = 'destination-out';
+      const r0 = 20;
+      const r1 = Math.min(innerWidth, innerHeight) * (0.35 + 0.35 * phase.light);
+      const g = ctx.createRadialGradient(cx, cy, r0, cx, cy, r1);
+      g.addColorStop(0.0, `rgba(0,0,0,${(0.95 * phase.light).toFixed(3)})`);
+      g.addColorStop(0.6, `rgba(0,0,0,${(0.45 * phase.light).toFixed(3)})`);
+      g.addColorStop(1.0, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(cx, cy, r1, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    } catch (e) { /* ignore lighting errors */ }
 
     // DEBUG OVERLAY
     if (true) {
@@ -1230,6 +2032,7 @@
       cyan: ants.filter(a => a.team === 1 && a.caste !== CASTE.EGG).length,
       cyanEggs: ants.filter(a => a.team === 1 && a.caste === CASTE.EGG).length,
       beetles: mobs.filter(m => m.type === 'beetle').length,
+      mealworms: mobs.filter(m => m.type === 'mealworm').length,
       worms: mobs.filter(m => m.type === 'worm').length
     };
     

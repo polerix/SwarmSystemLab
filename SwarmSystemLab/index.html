@@ -40,6 +40,7 @@
     width: 60px;
     height: 60px;
     border-radius: 50%;
+    /* Default (overridden by cosmic clockwork below) */
     background: radial-gradient(circle at 35% 35%, rgba(255, 255, 255, 0.95), rgba(200, 200, 220, 0.8) 20%, rgba(80, 80, 100, 0.9) 100%);
     box-shadow: 0 8px 16px rgba(0, 0, 0, 0.4), inset -4px -4px 10px rgba(0, 0, 0, 0.5);
     cursor: pointer;
@@ -53,6 +54,22 @@
     font-size: 24px;
     color: rgba(0, 0, 0, 0.6);
     user-select: none;
+  }
+
+  /* === Menu orb becomes the light source ===
+     Day: yellow orb with white shine
+     Night: grey orb, dimmed (visual)
+  */
+  #sphereWrapper[data-phase="day"] .sphere,
+  #sphereWrapper[data-phase="sunrise"] .sphere,
+  #sphereWrapper[data-phase="sunset"] .sphere {
+    background: radial-gradient(circle at 35% 35%, rgba(255, 255, 255, 0.98) 0%, rgba(255, 255, 255, 0.75) 10%, rgba(255, 238, 120, 0.95) 32%, rgba(210, 150, 30, 0.95) 100%);
+    box-shadow: 0 0 22px rgba(255, 245, 160, 0.55), 0 12px 20px rgba(0, 0, 0, 0.45), inset -4px -4px 10px rgba(0, 0, 0, 0.35);
+  }
+
+  #sphereWrapper[data-phase="night"] .sphere {
+    background: radial-gradient(circle at 35% 35%, rgba(255, 255, 255, 0.55) 0%, rgba(220, 220, 220, 0.35) 12%, rgba(140, 140, 150, 0.55) 35%, rgba(70, 70, 80, 0.95) 100%);
+    box-shadow: 0 0 10px rgba(255, 255, 255, 0.12), 0 10px 18px rgba(0, 0, 0, 0.55), inset -4px -4px 12px rgba(0, 0, 0, 0.6);
   }
 
   .sphere:hover {
