@@ -52,7 +52,7 @@
     align-items: center;
     justify-content: center;
     font-size: 24px;
-    color: rgba(0, 0, 0, 0.6);
+    color: var(--text);
     user-select: none;
   }
 
@@ -64,12 +64,12 @@
   #sphereWrapper[data-phase="sunrise"] .sphere,
   #sphereWrapper[data-phase="sunset"] .sphere {
     background: #ffd84a; /* flat sunlight */
-    box-shadow: 0 12px 20px rgba(0, 0, 0, 0.45);
+    box-shadow: none;
   }
 
   #sphereWrapper[data-phase="night"] .sphere {
     background: rgba(160, 160, 170, 0.20); /* flat 20% grey moonlight */
-    box-shadow: 0 12px 20px rgba(0, 0, 0, 0.55);
+    box-shadow: none;
   }
 
   .sphere:hover {
