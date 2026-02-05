@@ -264,7 +264,20 @@
 
   // Explorer recruitment pings: workers can latch onto a target and run a dedicated haul.
   const recruitSignals = []; // {team,x,y,kind,score,untilGS}
+  const RECRUIT_MAX = 50;
   function addRecruit(team, x, y, kind, score = 10, ttlGS = 2 * GS_HOUR) {
+    // Cap signals to prevent runaway memory/guidance spam
+    if (recruitSignals.length >= RECRUIT_MAX) {
+      // Replace the weakest/oldest
+      let wi = 0;
+      let wScore = Infinity;
+      for (let i = 0; i < recruitSignals.length; i++) {
+        const s = recruitSignals[i];
+        const sc = (s.score || 0) + (s.untilGS - gameSeconds) * 0.001;
+        if (sc < wScore) { wScore = sc; wi = i; }
+      }
+      recruitSignals.splice(wi, 1);
+    }
     recruitSignals.push({ team, x: wrapX(x), y, kind, score, untilGS: gameSeconds + ttlGS });
   }
   function pruneRecruit() {
@@ -704,10 +717,13 @@
     }
 
     // Pheromone evaporation (surface only)
-    const evap = dt * 2.5;
+    // Scale evaporation a bit with intensity to avoid full saturation.
+    const evapBase = dt * 2.0;
     for (let x = 0; x < W; x++) {
       const i = idx(x, SURFACE_WALK_Y);
-      pherFood[i] = Math.max(0, pherFood[i] - evap);
+      const v = pherFood[i];
+      const evap = evapBase + v * dt * 0.003;
+      pherFood[i] = Math.max(0, v - evap);
     }
 
     pruneRecruit();
